@@ -1,0 +1,30 @@
+name: Relevé urgences Index Santé vers Google Sheets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 * * * *'
+
+jobs:
+  scrape-and-write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Exécuter le relevé
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          LOCAL_TIMEZONE: America/Montreal
+          TARGET_HOURS_LOCAL: 8,16,22
+        run: python src/indexsante_to_sheets.py
