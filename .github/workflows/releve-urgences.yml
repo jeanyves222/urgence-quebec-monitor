@@ -26,5 +26,5 @@ jobs:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
           LOCAL_TIMEZONE: America/Montreal
-          TARGET_HOURS_LOCAL: 8,16,22
+          TARGET_HOURS_LOCAL: 8,16,24
         run: python src/indexsante_to_sheets.py
