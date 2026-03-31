@@ -112,9 +112,9 @@ def parse_quebec_global(text):
         "civieres_fonctionnelles_quebec": r"Civières fonctionnelles[^0-9]*([0-9][0-9\s]*)",
         "civieres_occupees_quebec": r"Civières occupées[^0-9]*([0-9][0-9\s]*)",
         "taux_occupation_quebec": r"Taux d'occupation[^0-9]*([0-9]{1,3})\s*%",
-        "plus_24h_quebec": r>24h[^0-9]*([0-9][0-9\s]*)",
-        "plus_48h_quebec": r>48h[^0-9]*([0-9][0-9\s]*)",
-    }
+        "plus_24h_quebec": r">\s*24h[^0-9]*([0-9][0-9\s]*)",
+        "plus_48h_quebec": r">\s*48h[^0-9]*([0-9][0-9\s]*)",
+        }
     for key, pat in patterns.items():
         m = re.search(pat, joined, flags=re.IGNORECASE)
         if m:
