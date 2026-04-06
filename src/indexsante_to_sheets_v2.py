@@ -13,23 +13,14 @@ URL = "https://www.indexsante.ca/urgences/#Bas-Saint-Laurent"
 TZ = ZoneInfo("America/Montreal")
 ALLOWED_HOURS = {0, 8, 16}
 
-# =========================
-# TEMPS
-# =========================
-
 def now_montreal():
     return datetime.now(TZ)
 
 def should_run():
     if os.environ.get("FORCE_RUN", "0") == "1":
         return True
-
     now = now_montreal()
     return now.hour in ALLOWED_HOURS and now.minute <= 10
-
-# =========================
-# GOOGLE SHEETS
-# =========================
 
 def connect_sheet():
     creds_json = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
@@ -48,61 +39,68 @@ def log(book, etape, niveau, message):
     ws = book.worksheet("Journal_Technique")
     ws.append_row([now_montreal().strftime("%Y-%m-%d %H:%M:%S"), etape, niveau, message])
 
-# =========================
-# SCRAPING
-# =========================
-
 def fetch_page():
     r = requests.get(URL, timeout=30)
     r.raise_for_status()
     return r.text
 
 def parse_last_update(text):
-    m = re.search(r"Dernière mise à jour.*?:\s*(.+)", text)
-    return m.group(1) if m else ""
+    patterns = [
+        r"Dernière mise à jour complète des données et des taux\s*:\s*([^\n]+)",
+        r"Dernière mise à jour\s*:\s*([^\n]+)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+    return ""
 
 def extract_number(pattern, text):
-    m = re.search(pattern, text)
+    m = re.search(pattern, text, flags=re.IGNORECASE)
     return m.group(1).replace(" ", "") if m else ""
+
+def extract_duration(pattern, text):
+    m = re.search(pattern, text, flags=re.IGNORECASE)
+    return m.group(1).strip().replace(" ", "") if m else ""
 
 def parse_quebec_global(text):
     return {
         "total": extract_number(r"Nombre total de personnes à l'urgence\s*:\s*([0-9\s]+)", text),
-        "attente_med": extract_number(r"attendent de voir un médecin\s*:\s*([0-9\s]+)", text),
-        "attente_salle": extract_number(r"salle d'attente.*?:\s*([0-9h\s]+)", text),
-        "attente_civiere": extract_number(r"civière.*?:\s*([0-9h\s]+)", text),
+        "attente_med": extract_number(r"Nombre de personnes qui attendent de voir un médecin\s*:\s*([0-9\s]+)", text),
+        "attente_salle": extract_duration(r"Durée moyenne de séjour des personnes dans la salle d'attente \(de la veille\)\s*:\s*([0-9hmin\s]+)", text),
+        "attente_civiere": extract_duration(r"Durée moyenne de séjour des personnes en attente sur une civière \(de la veille\)\s*:\s*([0-9hmin\s]+)", text),
         "civieres_fonc": extract_number(r"Civières fonctionnelles\s*:\s*([0-9\s]+)", text),
         "civieres_occ": extract_number(r"Civières occupées\s*:\s*([0-9\s]+)", text),
-        "taux": extract_number(r"Taux d'occupation.*?:\s*([0-9]+)", text),
-        "plus24": extract_number(r"plus de 24 heures\s*:\s*([0-9\s]+)", text),
-        "plus48": extract_number(r"plus de 48 heures\s*:\s*([0-9\s]+)", text),
+        "taux": extract_number(r"Taux d'occupation des civières\s*:\s*([0-9]+)\s*%", text),
+        "plus24": extract_number(r"Patients sur civière depuis plus de 24 heures\s*:\s*([0-9\s]+)", text),
+        "plus48": extract_number(r"Patients sur civière depuis plus de 48 heures\s*:\s*([0-9\s]+)", text),
     }
 
-# =========================
-# PARSEUR REGIONS + INSTALLATIONS
-# =========================
+def normalize_spaces(s):
+    return re.sub(r"\s+", " ", s).strip()
 
 def parse_regions_and_installations(soup):
     text = soup.get_text("\n", strip=True)
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    text = text.replace("\xa0", " ")
+    lines = [normalize_spaces(line) for line in text.split("\n") if normalize_spaces(line)]
 
     regions = []
     installations = []
-
-    current_region = None
     seen_regions = set()
+    current_region = ""
 
-    region_exclude_prefixes = {
-        "Situation générale",
-        "Tendance",
+    region_skip_prefixes = (
+        "Situation générale au Québec",
+        "Tendance 10 derniers jours",
         "Nom de l'installation",
-        "Nombre total de personnes",
-        "Nombre de personnes qui attendent",
+        "Nombre total de personnes à l'urgence",
+        "Nombre de personnes qui attendent de voir un médecin",
         "Civières fonctionnelles",
         "Civières occupées",
-        "Taux d'occupation",
-        "Patients sur civière",
-        "Besoin de voir un médecin",
+        "Taux d'occupation des civières",
+        "Patients sur civière depuis plus de 24 heures",
+        "Patients sur civière depuis plus de 48 heures",
+        "Besoin de voir un médecin rapidement",
         "Trouver un GMF",
         "Pour quels motifs",
         "Alternatives aux urgences",
@@ -110,73 +108,67 @@ def parse_regions_and_installations(soup):
         "Dernière mise à jour",
         "Répertoire santé",
         "Taux d'occupation et temps d'attente",
-    }
+    )
 
-    def is_region_line(line):
-        if "%" not in line:
-            return False
-        if any(line.startswith(prefix) for prefix in region_exclude_prefixes):
-            return False
-        if any(keyword in line for keyword in [
-            "HÔPITAL", "CENTRE ", "CLSC", "CHUS", "HÔTEL-DIEU",
-            "INSTITUT", "PAVILLON", "CHSLD"
-        ]):
-            return False
-        return re.match(r"^(.*?)\s+(\d{1,3})\s*%$", line) is not None
+    installation_prefixes = (
+        "HÔPITAL",
+        "CENTRE ",
+        "CLSC",
+        "CHUS",
+        "HÔTEL-DIEU",
+        "INSTITUT",
+        "PAVILLON",
+        "CHSLD",
+        "L'HÔTEL-DIEU",
+        "Hôpital ",
+    )
 
-    def parse_region_line(line):
-        m = re.match(r"^(.*?)\s+(\d{1,3})\s*%$", line)
-        return {
-            "region": m.group(1).strip(),
-            "taux_occupation_region": m.group(2).strip()
-        }
-
-    installation_keywords = [
-        "HÔPITAL", "CENTRE ", "CLSC", "CHUS", "HÔTEL-DIEU",
-        "INSTITUT", "PAVILLON", "CHSLD"
-    ]
-
-    def is_installation_line(line):
-        if not any(k in line for k in installation_keywords):
-            return False
-        nums = re.findall(r"\d+", line)
-        return len(nums) >= 7
-
-    def parse_installation_line(line, current_region):
-        nums = re.findall(r"\d+", line)
-
-        name = re.sub(r"\s+\d+(?:\s+\d+){6}\s*$", "", line).strip()
-
-        return {
-            "region": current_region or "",
-            "installation": name,
-            "total": nums[0],
-            "attente": nums[1],
-            "civieres_fonc": nums[2],
-            "civieres_occ": nums[3],
-            "taux": nums[4],
-            "plus24": nums[5],
-            "plus48": nums[6],
-        }
+    region_pattern = re.compile(r"^(.*?)\s+(\d{1,3})\s*%$")
+    installation_pattern = re.compile(
+        r"^(.*?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d{1,3})\s*%\s+(\d+)\s+(\d+)$"
+    )
 
     for line in lines:
-        if is_region_line(line):
-            region_data = parse_region_line(line)
-            if region_data["region"] not in seen_regions:
-                current_region = region_data["region"]
-                regions.append(region_data)
-                seen_regions.add(region_data["region"])
+        if line.startswith(region_skip_prefixes):
             continue
 
-        if is_installation_line(line):
-            inst = parse_installation_line(line, current_region)
-            installations.append(inst)
+        region_match = region_pattern.match(line)
+        if region_match and not line.startswith(installation_prefixes):
+            region_name = region_match.group(1).strip()
+            region_taux = region_match.group(2).strip()
+
+            if region_name not in seen_regions:
+                regions.append({
+                    "region": region_name,
+                    "taux_occupation_region": region_taux,
+                })
+                seen_regions.add(region_name)
+
+            current_region = region_name
+            continue
+
+        if not line.startswith(installation_prefixes):
+            continue
+
+        inst_match = installation_pattern.match(line)
+        if not inst_match:
+            continue
+
+        installation_name = inst_match.group(1).strip()
+
+        installations.append({
+            "region": current_region,
+            "installation": installation_name,
+            "total": inst_match.group(2),
+            "attente": inst_match.group(3),
+            "civieres_fonc": inst_match.group(4),
+            "civieres_occ": inst_match.group(5),
+            "taux": inst_match.group(6),
+            "plus24": inst_match.group(7),
+            "plus48": inst_match.group(8),
+        })
 
     return regions, installations
-
-# =========================
-# MAIN
-# =========================
 
 def main():
     book = connect_sheet()
@@ -194,7 +186,7 @@ def main():
 
     html = fetch_page()
     soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text("\n", strip=True)
+    text = soup.get_text("\n", strip=True).replace("\xa0", " ")
 
     maj = parse_last_update(text)
     qc = parse_quebec_global(text)
@@ -225,8 +217,7 @@ def main():
             i["taux"], i["plus24"], i["plus48"], URL
         ])
 
-    log(book, "ecriture", "SUCCES",
-        f"QC=1 Regions={len(regions)} Installations={len(installations)}")
+    log(book, "ecriture", "SUCCES", f"QC=1 Regions={len(regions)} Installations={len(installations)}")
 
 if __name__ == "__main__":
     main()
