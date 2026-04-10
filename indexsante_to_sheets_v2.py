@@ -187,8 +187,7 @@ def parse_regions_and_installations(soup):
         })
 
     return regions, installations, region_candidates, installation_candidates
-
-
+   
 
 def main():
     book = connect_sheet()
