@@ -201,6 +201,8 @@ def main():
     heure = now.strftime("%H:%M:%S")
     horodatage = now.strftime("%Y-%m-%d %H:%M:%S")
 
+    log(book, "debug_regions", "INFO", f"Candidats regions: {' || '.join(region_candidates[:5])}")
+    log(book, "debug_installations", "INFO", f"Candidats installations: {' || '.join(installation_candidates[:5])}")
     log(book, "demarrage", "INFO", "Debut du releve")
 
     html = fetch_page()
@@ -209,7 +211,8 @@ def main():
 
     maj = parse_last_update(text)
     qc = parse_quebec_global(text)
-    regions, installations = parse_regions_and_installations(soup)
+    regions, installations, region_candidates, installation_candidates = parse_regions_and_installations(soup)
+    
 
     ws_qc = book.worksheet("Quebec_Global")
     ws_regions = book.worksheet("Regions")
