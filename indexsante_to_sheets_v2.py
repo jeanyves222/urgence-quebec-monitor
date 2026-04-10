@@ -100,6 +100,9 @@ def parse_regions_and_installations(soup):
     seen_regions = set()
     current_region = ""
 
+    region_candidates = []
+    installation_candidates = []
+
     region_skip_prefixes = (
         "Situation générale au Québec",
         "Tendance 10 derniers jours",
@@ -140,6 +143,12 @@ def parse_regions_and_installations(soup):
     )
 
     for line in lines:
+        if "%" in line and len(region_candidates) < 10:
+            region_candidates.append(line)
+
+        if any(line.startswith(prefix) for prefix in installation_prefixes) and len(installation_candidates) < 10:
+            installation_candidates.append(line)
+
         if line.startswith(region_skip_prefixes):
             continue
 
@@ -165,11 +174,9 @@ def parse_regions_and_installations(soup):
         if not inst_match:
             continue
 
-        installation_name = inst_match.group(1).strip()
-
         installations.append({
             "region": current_region,
-            "installation": installation_name,
+            "installation": inst_match.group(1).strip(),
             "total": inst_match.group(2),
             "attente": inst_match.group(3),
             "civieres_fonc": inst_match.group(4),
@@ -179,7 +186,8 @@ def parse_regions_and_installations(soup):
             "plus48": inst_match.group(8),
         })
 
-    return regions, installations
+    return regions, installations, region_candidates, installation_candidates
+
 
 
 def main():
