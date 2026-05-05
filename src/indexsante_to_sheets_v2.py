@@ -183,7 +183,7 @@ def main():
     book = connect_sheet()
 
     if not should_run():
-        log(book, "horaire", "INFO", "Execution ignoree: heure locale non ciblee")
+        log(book, "horaire", "INFO", "Execution ignoree")
         return
 
     now = now_montreal()
@@ -205,7 +205,7 @@ def main():
     ws_regions = book.worksheet("Regions")
     ws_inst = book.worksheet("Installations")
 
-        append_row(ws_qc, [
+    append_row(ws_qc, [
         date, heure, horodatage, maj,
         qc["total"], qc["attente_med"], qc["attente_salle"],
         qc["attente_civiere"], qc["civieres_fonc"], qc["civieres_occ"],
@@ -230,13 +230,14 @@ def main():
 
     append_rows_batch(ws_regions, region_rows)
     append_rows_batch(ws_inst, installation_rows)
-   
+
     log(
         book,
         "debug",
         "INFO",
         f"Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}"
     )
+
     log(book, "ecriture", "SUCCES", f"QC=1 Regions={len(regions)} Installations={len(installations)}")
 
 
