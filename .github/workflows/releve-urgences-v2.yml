@@ -1,4 +1,4 @@
- name: releve-urgences-v2
+name: releve-urgences-v2
 
 on:
   workflow_dispatch:
@@ -27,4 +27,5 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          FORCE_RUN: "1"
         run: python src/indexsante_to_sheets_v2.py
