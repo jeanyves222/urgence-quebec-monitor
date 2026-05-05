@@ -205,27 +205,32 @@ def main():
     ws_regions = book.worksheet("Regions")
     ws_inst = book.worksheet("Installations")
 
-    append_row(ws_qc, [
+        append_row(ws_qc, [
         date, heure, horodatage, maj,
         qc["total"], qc["attente_med"], qc["attente_salle"],
         qc["attente_civiere"], qc["civieres_fonc"], qc["civieres_occ"],
         qc["taux"], qc["plus24"], qc["plus48"], URL
     ])
 
+    region_rows = []
     for r in regions:
-        append_row(ws_regions, [
+        region_rows.append([
             date, heure, horodatage, maj,
             r["region"], r["taux_occupation_region"], URL
         ])
 
+    installation_rows = []
     for i in installations:
-        append_row(ws_inst, [
+        installation_rows.append([
             date, heure, horodatage, maj,
             i["region"], i["installation"], i["total"],
             i["attente"], i["civieres_fonc"], i["civieres_occ"],
             i["taux"], i["plus24"], i["plus48"], URL
         ])
 
+    append_rows_batch(ws_regions, region_rows)
+    append_rows_batch(ws_inst, installation_rows)
+   
     log(
         book,
         "debug",
