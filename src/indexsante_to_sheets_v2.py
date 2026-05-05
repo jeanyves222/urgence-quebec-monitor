@@ -39,6 +39,9 @@ def connect_sheet():
 def append_row(ws, row):
     ws.append_row(row, value_input_option="USER_ENTERED")
 
+def append_rows_batch(ws, rows):
+    if rows:
+        ws.append_rows(rows, value_input_option="USER_ENTERED")
 
 def log(book, etape, niveau, message):
     ws = book.worksheet("Journal_Technique")
