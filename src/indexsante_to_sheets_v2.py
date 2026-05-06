@@ -22,7 +22,7 @@ def should_run():
     if os.environ.get("FORCE_RUN", "0") == "1":
         return True
     now = now_montreal()
-    return now.hour in ALLOWED_HOURS and now.minute <= 10
+    return now.hour in ALLOWED_HOURS 
 
 
 def connect_sheet():
