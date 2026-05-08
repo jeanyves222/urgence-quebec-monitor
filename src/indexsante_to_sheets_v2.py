@@ -184,16 +184,17 @@ def parse_regions_and_installations(soup):
 
 def main():
     book = connect_sheet()
+
     now_check = now_montreal()
 
-if not should_run():
-    log(
-        book,
-        "horaire",
-        "INFO",
-        f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | allowed={sorted(ALLOWED_HOURS)}"
-    )
-return
+    if not should_run():
+        log(
+            book,
+            "horaire",
+            "INFO",
+            f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | allowed={sorted(ALLOWED_HOURS)}"
+        )
+        return
 
     now = now_montreal()
     date = now.strftime("%Y-%m-%d")
