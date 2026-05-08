@@ -193,8 +193,8 @@ if not should_run():
         "INFO",
         f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | allowed={sorted(ALLOWED_HOURS)}"
     )
-    
-       
+return
+
     now = now_montreal()
     date = now.strftime("%Y-%m-%d")
     heure = now.strftime("%H:%M:%S")
