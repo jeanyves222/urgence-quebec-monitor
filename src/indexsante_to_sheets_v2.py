@@ -18,11 +18,26 @@ def now_montreal():
     return datetime.now(TZ)
 
 
+def get_creneau_releve():
+    now = now_montreal()
+
+    if now.hour in [0, 1]:
+        return f"{now.strftime('%Y-%m-%d')}_00"
+
+    if now.hour in [8, 9]:
+        return f"{now.strftime('%Y-%m-%d')}_08"
+
+    if now.hour in [16, 17]:
+        return f"{now.strftime('%Y-%m-%d')}_16"
+
+    return None
+
+
 def should_run():
     if os.environ.get("FORCE_RUN", "0") == "1":
         return True
-    now = now_montreal()
-    return now.hour in ALLOWED_HOURS 
+
+    return get_creneau_releve() is not None
 
 
 def connect_sheet():
@@ -39,13 +54,26 @@ def connect_sheet():
 def append_row(ws, row):
     ws.append_row(row, value_input_option="USER_ENTERED")
 
+
 def append_rows_batch(ws, rows):
     if rows:
         ws.append_rows(rows, value_input_option="USER_ENTERED")
 
+
 def log(book, etape, niveau, message):
     ws = book.worksheet("Journal_Technique")
     ws.append_row([now_montreal().strftime("%Y-%m-%d %H:%M:%S"), etape, niveau, message])
+
+
+def creneau_deja_present(book, creneau):
+    ws = book.worksheet("Journal_Technique")
+    values = ws.get_all_values()
+
+    for row in values:
+        if len(row) >= 4 and creneau in row[3]:
+            return True
+
+    return False
 
 
 def fetch_page():
@@ -185,15 +213,23 @@ def parse_regions_and_installations(soup):
 def main():
     book = connect_sheet()
 
-    now_check = now_montreal()
+    creneau = get_creneau_releve()
+
+    if os.environ.get("FORCE_RUN", "0") == "1":
+        creneau = f"FORCE_RUN_{now_montreal().strftime('%Y-%m-%d_%H-%M-%S')}"
 
     if not should_run():
+        now_check = now_montreal()
         log(
             book,
             "horaire",
             "INFO",
-            f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | allowed={sorted(ALLOWED_HOURS)}"
+            f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | creneau=AUCUN"
         )
+        return
+
+    if creneau_deja_present(book, creneau):
+        log(book, "doublon", "INFO", f"Execution ignoree | creneau deja present: {creneau}")
         return
 
     now = now_montreal()
@@ -201,7 +237,7 @@ def main():
     heure = now.strftime("%H:%M:%S")
     horodatage = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    log(book, "demarrage", "INFO", "Debut du releve")
+    log(book, "demarrage", "INFO", f"Debut du releve | creneau={creneau}")
 
     html = fetch_page()
     soup = BeautifulSoup(html, "html.parser")
@@ -245,10 +281,15 @@ def main():
         book,
         "debug",
         "INFO",
-        f"Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}"
+        f"creneau={creneau} | Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}"
     )
 
-    log(book, "ecriture", "SUCCES", f"QC=1 Regions={len(regions)} Installations={len(installations)}")
+    log(
+        book,
+        "ecriture",
+        "SUCCES",
+        f"creneau={creneau} | QC=1 Regions={len(regions)} Installations={len(installations)}"
+    )
 
 
 if __name__ == "__main__":
