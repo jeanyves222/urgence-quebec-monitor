@@ -21,16 +21,22 @@ def now_montreal():
 def get_creneau_releve():
     now = now_montreal()
 
-    if now.hour in [0, 1]:
+    # Rattrapage élargi :
+    # 00h accepté de 00:00 à 02:59
+    # 08h accepté de 08:00 à 10:59
+    # 16h accepté de 16:00 à 18:59
+
+    if now.hour in [0, 1, 2]:
         return f"{now.strftime('%Y-%m-%d')}_00"
 
-    if now.hour in [8, 9]:
+    if now.hour in [8, 9, 10]:
         return f"{now.strftime('%Y-%m-%d')}_08"
 
-    if now.hour in [16, 17]:
+    if now.hour in [16, 17, 18]:
         return f"{now.strftime('%Y-%m-%d')}_16"
 
     return None
+
 
 
 def should_run():
