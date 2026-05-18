@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -11,7 +12,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 URL = "https://www.indexsante.ca/urgences/#Bas-Saint-Laurent"
 TZ = ZoneInfo("America/Montreal")
-ALLOWED_HOURS = {0, 8, 16}
 
 
 def now_montreal():
@@ -20,11 +20,6 @@ def now_montreal():
 
 def get_creneau_releve():
     now = now_montreal()
-
-    # Rattrapage élargi :
-    # 00h accepté de 00:00 à 02:59
-    # 08h accepté de 08:00 à 10:59
-    # 16h accepté de 16:00 à 18:59
 
     if now.hour in [0, 1, 2]:
         return f"{now.strftime('%Y-%m-%d')}_00"
@@ -38,45 +33,63 @@ def get_creneau_releve():
     return None
 
 
-
 def should_run():
     if os.environ.get("FORCE_RUN", "0") == "1":
         return True
-
     return get_creneau_releve() is not None
 
 
+def retry(operation, attempts=3, delay=10):
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as e:
+            last_error = e
+            if attempt < attempts:
+                time.sleep(delay)
+    raise last_error
+
+
 def connect_sheet():
-    creds_json = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(os.environ["GOOGLE_SHEET_ID"])
+    def operation():
+        creds_json = json.loads(os.environ["GCP_SERVICE_ACCOUNT_JSON"])
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+        client = gspread.authorize(creds)
+        return client.open_by_key(os.environ["GOOGLE_SHEET_ID"])
+
+    return retry(operation, attempts=3, delay=15)
 
 
 def append_row(ws, row):
-    ws.append_row(row, value_input_option="USER_ENTERED")
+    retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"), attempts=3, delay=10)
 
 
 def append_rows_batch(ws, rows):
     if rows:
-        ws.append_rows(rows, value_input_option="USER_ENTERED")
+        retry(lambda: ws.append_rows(rows, value_input_option="USER_ENTERED"), attempts=3, delay=10)
 
 
 def log(book, etape, niveau, message):
     ws = book.worksheet("Journal_Technique")
-    ws.append_row([now_montreal().strftime("%Y-%m-%d %H:%M:%S"), etape, niveau, message])
+    ws.append_row([
+        now_montreal().strftime("%Y-%m-%d %H:%M:%S"),
+        etape,
+        niveau,
+        message
+    ], value_input_option="USER_ENTERED")
 
 
 def creneau_deja_present(book, creneau):
     ws = book.worksheet("Journal_Technique")
-    values = ws.get_all_values()
+    values = retry(lambda: ws.get_all_values(), attempts=3, delay=10)
 
     for row in values:
-        if len(row) >= 4 and creneau in row[3]:
+        if len(row) >= 4 and f"creneau={creneau}" in row[3]:
             return True
 
     return False
@@ -84,15 +97,19 @@ def creneau_deja_present(book, creneau):
 
 def fetch_page():
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    r = requests.get(URL, headers=headers, timeout=30)
-    r.raise_for_status()
-    return r.text
+
+    def operation():
+        r = requests.get(URL, headers=headers, timeout=30)
+        r.raise_for_status()
+        return r.text
+
+    return retry(operation, attempts=3, delay=10)
 
 
 def normalize_spaces(s):
@@ -226,12 +243,7 @@ def main():
 
     if not should_run():
         now_check = now_montreal()
-        log(
-            book,
-            "horaire",
-            "INFO",
-            f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | creneau=AUCUN"
-        )
+        log(book, "horaire", "INFO", f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | creneau=AUCUN")
         return
 
     if creneau_deja_present(book, creneau):
@@ -283,19 +295,8 @@ def main():
     append_rows_batch(ws_regions, region_rows)
     append_rows_batch(ws_inst, installation_rows)
 
-    log(
-        book,
-        "debug",
-        "INFO",
-        f"creneau={creneau} | Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}"
-    )
-
-    log(
-        book,
-        "ecriture",
-        "SUCCES",
-        f"creneau={creneau} | QC=1 Regions={len(regions)} Installations={len(installations)}"
-    )
+    log(book, "debug", "INFO", f"creneau={creneau} | Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}")
+    log(book, "ecriture", "SUCCES", f"creneau={creneau} | QC=1 Regions={len(regions)} Installations={len(installations)}")
 
 
 if __name__ == "__main__":
