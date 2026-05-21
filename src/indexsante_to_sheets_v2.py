@@ -21,7 +21,7 @@ def now_montreal():
 def get_creneau_releve():
     now = now_montreal()
 
-    if now.hour in [0, 1, 2,3]:
+    if now.hour in [0, 1, 2, 3]:
         return f"{now.strftime('%Y-%m-%d')}_00"
 
     if now.hour in [8, 9, 10]:
