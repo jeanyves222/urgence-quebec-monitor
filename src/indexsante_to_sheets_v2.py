@@ -41,6 +41,7 @@ def should_run():
 
 def retry(operation, attempts=3, delay=10):
     last_error = None
+
     for attempt in range(1, attempts + 1):
         try:
             return operation()
@@ -48,6 +49,7 @@ def retry(operation, attempts=3, delay=10):
             last_error = e
             if attempt < attempts:
                 time.sleep(delay)
+
     raise last_error
 
 
@@ -65,39 +67,86 @@ def connect_sheet():
     return retry(operation, attempts=3, delay=15)
 
 
+def get_or_create_ws(book, title, headers):
+    try:
+        ws = book.worksheet(title)
+    except gspread.WorksheetNotFound:
+        ws = book.add_worksheet(title=title, rows=1000, cols=max(len(headers), 10))
+        ws.append_row(headers, value_input_option="USER_ENTERED")
+
+    return ws
+
+
 def append_row(ws, row):
-    retry(lambda: ws.append_row(row, value_input_option="USER_ENTERED"), attempts=3, delay=10)
+    retry(
+        lambda: ws.append_row(row, value_input_option="USER_ENTERED"),
+        attempts=3,
+        delay=10,
+    )
 
 
 def append_rows_batch(ws, rows):
     if rows:
-        retry(lambda: ws.append_rows(rows, value_input_option="USER_ENTERED"), attempts=3, delay=10)
+        retry(
+            lambda: ws.append_rows(rows, value_input_option="USER_ENTERED"),
+            attempts=3,
+            delay=10,
+        )
 
 
 def log(book, etape, niveau, message):
-    ws = book.worksheet("Journal_Technique")
-    ws.append_row([
-        now_montreal().strftime("%Y-%m-%d %H:%M:%S"),
-        etape,
-        niveau,
-        message
-    ], value_input_option="USER_ENTERED")
+    ws = get_or_create_ws(
+        book,
+        "Journal_Technique",
+        ["horodatage", "etape", "niveau", "message"],
+    )
+
+    append_row(
+        ws,
+        [
+            now_montreal().strftime("%Y-%m-%d %H:%M:%S"),
+            etape,
+            niveau,
+            message,
+        ],
+    )
 
 
 def creneau_deja_present(book, creneau):
-    ws = book.worksheet("Journal_Technique")
-    values = retry(lambda: ws.get_all_values(), attempts=3, delay=10)
+    ws = get_or_create_ws(
+        book,
+        "Controle_Creneaux",
+        ["creneau", "date_execution", "statut", "message"],
+    )
 
-    for row in values:
-        if len(row) >= 4 and f"creneau={creneau}" in row[3]:
-            return True
+    values = retry(lambda: ws.col_values(1), attempts=3, delay=10)
+    return creneau in values
 
-    return False
+
+def enregistrer_creneau(book, creneau, statut, message):
+    ws = get_or_create_ws(
+        book,
+        "Controle_Creneaux",
+        ["creneau", "date_execution", "statut", "message"],
+    )
+
+    append_row(
+        ws,
+        [
+            creneau,
+            now_montreal().strftime("%Y-%m-%d %H:%M:%S"),
+            statut,
+            message,
+        ],
+    )
 
 
 def fetch_page():
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36"
+        ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.8",
         "Cache-Control": "no-cache",
@@ -121,10 +170,12 @@ def parse_last_update(text):
         r"Dernière mise à jour complète des données et des taux\s*:\s*([^\n]+)",
         r"Dernière mise à jour\s*:\s*([^\n]+)",
     ]
+
     for pattern in patterns:
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if m:
             return m.group(1).strip()
+
     return ""
 
 
@@ -140,15 +191,38 @@ def extract_duration(pattern, text):
 
 def parse_quebec_global(text):
     return {
-        "total": extract_number(r"Nombre total de personnes à l'urgence\s*:\s*([0-9\s]+)", text),
-        "attente_med": extract_number(r"Nombre de personnes qui attendent de voir un médecin\s*:\s*([0-9\s]+)", text),
-        "attente_salle": extract_duration(r"Durée moyenne de séjour des personnes dans la salle d'attente \(de la veille\)\s*:\s*([0-9hmin\s]+)", text),
-        "attente_civiere": extract_duration(r"Durée moyenne de séjour des personnes en attente sur une civière \(de la veille\)\s*:\s*([0-9hmin\s]+)", text),
-        "civieres_fonc": extract_number(r"Civières fonctionnelles\s*:\s*([0-9\s]+)", text),
-        "civieres_occ": extract_number(r"Civières occupées\s*:\s*([0-9\s]+)", text),
-        "taux": extract_number(r"Taux d'occupation des civières\s*:\s*([0-9]+)\s*%", text),
-        "plus24": extract_number(r"Patients sur civière depuis plus de 24 heures\s*:\s*([0-9\s]+)", text),
-        "plus48": extract_number(r"Patients sur civière depuis plus de 48 heures\s*:\s*([0-9\s]+)", text),
+        "total": extract_number(
+            r"Nombre total de personnes à l'urgence\s*:\s*([0-9\s]+)", text
+        ),
+        "attente_med": extract_number(
+            r"Nombre de personnes qui attendent de voir un médecin\s*:\s*([0-9\s]+)",
+            text,
+        ),
+        "attente_salle": extract_duration(
+            r"Durée moyenne de séjour des personnes dans la salle d'attente \(de la veille\)\s*:\s*([0-9hmin\s]+)",
+            text,
+        ),
+        "attente_civiere": extract_duration(
+            r"Durée moyenne de séjour des personnes en attente sur une civière \(de la veille\)\s*:\s*([0-9hmin\s]+)",
+            text,
+        ),
+        "civieres_fonc": extract_number(
+            r"Civières fonctionnelles\s*:\s*([0-9\s]+)", text
+        ),
+        "civieres_occ": extract_number(
+            r"Civières occupées\s*:\s*([0-9\s]+)", text
+        ),
+        "taux": extract_number(
+            r"Taux d'occupation des civières\s*:\s*([0-9]+)\s*%", text
+        ),
+        "plus24": extract_number(
+            r"Patients sur civière depuis plus de 24 heures\s*:\s*([0-9\s]+)",
+            text,
+        ),
+        "plus48": extract_number(
+            r"Patients sur civière depuis plus de 48 heures\s*:\s*([0-9\s]+)",
+            text,
+        ),
     }
 
 
@@ -185,12 +259,15 @@ def parse_regions_and_installations(soup):
             flags=re.IGNORECASE,
         )
         m = pattern.search(text)
+
         if m:
-            region_hits.append({
-                "region": region,
-                "taux": m.group(1),
-                "start": m.start(),
-            })
+            region_hits.append(
+                {
+                    "region": region,
+                    "taux": m.group(1),
+                    "start": m.start(),
+                }
+            )
 
     region_hits.sort(key=lambda x: x["start"])
 
@@ -208,34 +285,37 @@ def parse_regions_and_installations(soup):
 
         block = text[start:end]
 
-        regions.append({
-            "region": region,
-            "taux_occupation_region": taux,
-        })
+        regions.append(
+            {
+                "region": region,
+                "taux_occupation_region": taux,
+            }
+        )
 
         for match in installation_pattern.finditer(block):
             prefix = match.group(1)
             rest = match.group(2).strip()
             installation_name = f"{prefix} {rest}".strip()
 
-            installations.append({
-                "region": region,
-                "installation": installation_name,
-                "total": match.group(3),
-                "attente": match.group(4),
-                "civieres_fonc": match.group(5),
-                "civieres_occ": match.group(6),
-                "taux": match.group(7),
-                "plus24": match.group(8),
-                "plus48": match.group(9),
-            })
+            installations.append(
+                {
+                    "region": region,
+                    "installation": installation_name,
+                    "total": match.group(3),
+                    "attente": match.group(4),
+                    "civieres_fonc": match.group(5),
+                    "civieres_occ": match.group(6),
+                    "taux": match.group(7),
+                    "plus24": match.group(8),
+                    "plus48": match.group(9),
+                }
+            )
 
     return regions, installations
 
 
 def main():
     book = connect_sheet()
-
     creneau = get_creneau_releve()
 
     if os.environ.get("FORCE_RUN", "0") == "1":
@@ -243,11 +323,24 @@ def main():
 
     if not should_run():
         now_check = now_montreal()
-        log(book, "horaire", "INFO", f"Execution ignoree | heure={now_check.hour} | minute={now_check.minute} | creneau=AUCUN")
+        log(
+            book,
+            "horaire",
+            "INFO",
+            (
+                f"Execution ignoree | heure={now_check.hour} | "
+                f"minute={now_check.minute} | creneau=AUCUN"
+            ),
+        )
         return
 
     if creneau_deja_present(book, creneau):
-        log(book, "doublon", "INFO", f"Execution ignoree | creneau deja present: {creneau}")
+        log(
+            book,
+            "doublon",
+            "INFO",
+            f"Execution ignoree | creneau deja present: {creneau}",
+        )
         return
 
     now = now_montreal()
@@ -265,38 +358,94 @@ def main():
     qc = parse_quebec_global(text)
     regions, installations = parse_regions_and_installations(soup)
 
+    if len(regions) < 10 or len(installations) < 50:
+        message = (
+            f"Extraction suspecte | creneau={creneau} | "
+            f"Regions={len(regions)} | Installations={len(installations)}"
+        )
+        log(book, "validation", "ERREUR", message)
+        enregistrer_creneau(book, creneau, "ERREUR", message)
+        return
+
     ws_qc = book.worksheet("Quebec_Global")
     ws_regions = book.worksheet("Regions")
     ws_inst = book.worksheet("Installations")
 
-    append_row(ws_qc, [
-        date, heure, horodatage, maj,
-        qc["total"], qc["attente_med"], qc["attente_salle"],
-        qc["attente_civiere"], qc["civieres_fonc"], qc["civieres_occ"],
-        qc["taux"], qc["plus24"], qc["plus48"], URL
-    ])
+    append_row(
+        ws_qc,
+        [
+            date,
+            heure,
+            horodatage,
+            maj,
+            qc["total"],
+            qc["attente_med"],
+            qc["attente_salle"],
+            qc["attente_civiere"],
+            qc["civieres_fonc"],
+            qc["civieres_occ"],
+            qc["taux"],
+            qc["plus24"],
+            qc["plus48"],
+            URL,
+        ],
+    )
 
     region_rows = []
     for r in regions:
-        region_rows.append([
-            date, heure, horodatage, maj,
-            r["region"], r["taux_occupation_region"], URL
-        ])
+        region_rows.append(
+            [
+                date,
+                heure,
+                horodatage,
+                maj,
+                r["region"],
+                r["taux_occupation_region"],
+                URL,
+            ]
+        )
 
     installation_rows = []
     for i in installations:
-        installation_rows.append([
-            date, heure, horodatage, maj,
-            i["region"], i["installation"], i["total"],
-            i["attente"], i["civieres_fonc"], i["civieres_occ"],
-            i["taux"], i["plus24"], i["plus48"], URL
-        ])
+        installation_rows.append(
+            [
+                date,
+                heure,
+                horodatage,
+                maj,
+                i["region"],
+                i["installation"],
+                i["total"],
+                i["attente"],
+                i["civieres_fonc"],
+                i["civieres_occ"],
+                i["taux"],
+                i["plus24"],
+                i["plus48"],
+                URL,
+            ]
+        )
 
     append_rows_batch(ws_regions, region_rows)
     append_rows_batch(ws_inst, installation_rows)
 
-    log(book, "debug", "INFO", f"creneau={creneau} | Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}")
-    log(book, "ecriture", "SUCCES", f"creneau={creneau} | QC=1 Regions={len(regions)} Installations={len(installations)}")
+    log(
+        book,
+        "debug",
+        "INFO",
+        (
+            f"creneau={creneau} | "
+            f"Premiere region: {regions[0]['region'] if regions else 'AUCUNE'} | "
+            f"Premiere installation: {installations[0]['installation'] if installations else 'AUCUNE'}"
+        ),
+    )
+
+    message = (
+        f"creneau={creneau} | "
+        f"QC=1 Regions={len(regions)} Installations={len(installations)}"
+    )
+    log(book, "ecriture", "SUCCES", message)
+    enregistrer_creneau(book, creneau, "SUCCES", message)
 
 
 if __name__ == "__main__":
