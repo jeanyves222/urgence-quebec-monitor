@@ -3,7 +3,9 @@ name: releve-urgences-v2
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *'
+    # Heures UTC. En heure avancée de Montréal (été), cela couvre :
+    # 00h-03h, 08h-10h, 16h-18h environ.
+    - cron: '15 4,5,6,12,13,14,20,21,22 * * *'
 
 jobs:
   run-script:
@@ -27,5 +29,4 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          
         run: python src/indexsante_to_sheets_v2.py
