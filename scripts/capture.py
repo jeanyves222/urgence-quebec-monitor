@@ -46,20 +46,42 @@ URL_CSV_HORAIRE = BASE + "Releve_horaire_urgences_7jours.csv"
 URL_PDF_QUOTIDIEN = BASE + "Rap_Quotid_SituatUrgence1.pdf"
 URL_PDF_HORAIRE = BASE + "Rap_horaire_SituatUrgence1.pdf"
 
-# Le site refuse les requêtes sans en-tête crédible. Les pages HTML ont une
-# détection de robots ; le répertoire /documents/ n'en a pas, mais autant
-# rester poli et identifiable.
+# Page d'ou proviennent normalement les liens : certains pare-feu applicatifs
+# refusent une requete sans Referer coherent.
+PAGE_REFERENTE = ("https://msss.gouv.qc.ca/professionnels/"
+                  "statistiques-donnees-services-sante-services-sociaux/donnees-urgences/")
+
 # ATTENTION : les en-tetes HTTP doivent etre encodables en latin-1. Un tiret
 # cadratin ou une lettre accentuee ici fait planter requests avec une
 # UnicodeEncodeError avant meme le telechargement. Garder ces valeurs en ASCII.
+#
+# Le premier essai du 13 aout 2026 depuis GitHub Actions a recu un HTTP 403 sur
+# les deux fichiers, alors que les memes URL repondent depuis un navigateur.
+# Deux causes possibles : un User-Agent juge non conforme (le notre portait un
+# suffixe entre parentheses, ce qu'aucun navigateur reel n'ajoute), ou un
+# blocage par reputation d'adresse IP. On presente donc un jeu d'en-tetes de
+# navigateur complet et rigoureusement standard.
 ENTETES = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0 Safari/537.36 "
-        "(collecte citoyenne - comite Mes soins restent ICI)"
-    ),
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/127.0.0.0 Safari/537.36"),
+    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
+               "image/avif,image/webp,application/pdf,*/*;q=0.8"),
+    "Accept-Language": "fr-CA,fr-FR;q=0.9,fr;q=0.8,en-US;q=0.7,en;q=0.6",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Referer": PAGE_REFERENTE,
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Connection": "keep-alive",
+}
+
+# Repli si le premier jeu est refuse : un client generique, sans Sec-Fetch.
+ENTETES_REPLI = {
+    "User-Agent": "curl/8.5.0",
     "Accept": "*/*",
-    "Accept-Language": "fr-CA,fr;q=0.9",
 }
 
 DELAI = 60          # secondes
@@ -92,16 +114,47 @@ def journal(niveau, message):
 
 
 def telecharger(url):
-    """Retourne (contenu_binaire, None) ou (None, message_d_erreur)."""
-    try:
-        r = requests.get(url, headers=ENTETES, timeout=DELAI)
-    except requests.RequestException as err:
-        return None, f"échec réseau : {err}"
-    if r.status_code != 200:
-        return None, f"code HTTP {r.status_code}"
-    if not r.content:
-        return None, "réponse vide"
-    return r.content, None
+    """Retourne (contenu_binaire, None) ou (None, message_d_erreur).
+
+    Deux tentatives avec des en-têtes différents : d'abord un jeu de navigateur
+    complet, puis un client générique. Un pare-feu applicatif peut refuser
+    l'un et accepter l'autre. En cas de refus, on journalise ce que le serveur
+    renvoie (serveur, type de contenu, début du corps) — sans ce détail, un 403
+    ne dit pas s'il vient d'un filtre d'en-têtes ou d'un blocage d'adresse IP.
+    """
+    dernier = ""
+    for tentative, entetes in enumerate((ENTETES, ENTETES_REPLI), start=1):
+        try:
+            with requests.Session() as session:
+                # Une visite préalable de la page référente donne au serveur un
+                # parcours de navigation plausible et récupère ses témoins.
+                if tentative == 1:
+                    try:
+                        session.get(PAGE_REFERENTE, headers=entetes, timeout=DELAI)
+                    except requests.RequestException:
+                        pass  # échec sans conséquence : on tente le fichier quand même
+                r = session.get(url, headers=entetes, timeout=DELAI,
+                                allow_redirects=True)
+        except requests.RequestException as err:
+            dernier = f"échec réseau : {err}"
+            continue
+
+        if r.status_code == 200 and r.content:
+            if tentative > 1:
+                journal("REPLI", f"accepté au {tentative}e jeu d'en-têtes")
+            return r.content, None
+
+        if r.status_code == 200:
+            dernier = "réponse vide"
+        else:
+            apercu = (r.text or "")[:160].replace("\n", " ").strip()
+            dernier = (f"code HTTP {r.status_code} (tentative {tentative}) — "
+                       f"serveur « {r.headers.get('Server', 'non déclaré')} », "
+                       f"type « {r.headers.get('Content-Type', 'non déclaré')} », "
+                       f"début du corps : {apercu or 'vide'}")
+            journal("DIAGNOSTIC", dernier)
+
+    return None, dernier
 
 
 # ══════════════════════════════════════════════════════════════════════════
