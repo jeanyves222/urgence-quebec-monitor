@@ -1,0 +1,72 @@
+name: Capture des relevés d'urgence
+
+# Un seul workflow pour les deux fichiers : le CSV horaire est capté à chaque
+# passage, le relevé quotidien seulement s'il n'a pas déjà été pris aujourd'hui.
+# Un seul commit par passage, donc aucune course entre deux workflows.
+#
+# Le cron de GitHub est en UTC et peut être retardé de quelques minutes, parfois
+# davantage aux heures rondes de forte charge. Sans importance ici : le nom du
+# fichier archivé vient de l'horodatage DE LA SOURCE, pas de l'heure d'exécution.
+#
+# Le passage horaire sert aussi de garde-fou pour le relevé quotidien : s'il est
+# encore en gabarit ou pas régénéré à 12 h, le passage de 13 h réessaiera, et
+# ainsi de suite jusqu'à la fin de la journée.
+
+on:
+  schedule:
+    - cron: "20 * * * *"   # toutes les heures, à la 20e minute (après la mise à jour de la source)
+  workflow_dispatch:        # déclenchement manuel depuis l'onglet Actions
+
+# Empêche deux exécutions de se marcher dessus au moment du push.
+concurrency:
+  group: capture-urgences
+  cancel-in-progress: false
+
+permissions:
+  contents: write           # nécessaire pour committer les fichiers captés
+
+jobs:
+  capturer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-capture.txt
+
+      - name: Capturer les relevés
+        id: capture
+        run: python3 scripts/capture.py
+
+      - name: Committer et pousser si du neuf
+        if: steps.capture.outputs.ecritures != '0'
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "Rien à committer."
+            exit 0
+          fi
+          git commit -m "Capture automatique — $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Une autre exécution a pu pousser entre-temps : on rejoue par-dessus.
+          for tentative in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push refusé (tentative $tentative) — rebase et nouvel essai."
+            git pull --rebase --autostash
+            sleep 5
+          done
+          echo "::error::Push impossible après trois tentatives."
+          exit 1
