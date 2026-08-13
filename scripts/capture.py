@@ -49,11 +49,14 @@ URL_PDF_HORAIRE = BASE + "Rap_horaire_SituatUrgence1.pdf"
 # Le site refuse les requêtes sans en-tête crédible. Les pages HTML ont une
 # détection de robots ; le répertoire /documents/ n'en a pas, mais autant
 # rester poli et identifiable.
+# ATTENTION : les en-tetes HTTP doivent etre encodables en latin-1. Un tiret
+# cadratin ou une lettre accentuee ici fait planter requests avec une
+# UnicodeEncodeError avant meme le telechargement. Garder ces valeurs en ASCII.
 ENTETES = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0 Safari/537.36 "
-        "(collecte citoyenne — comite Mes soins restent ICI)"
+        "(collecte citoyenne - comite Mes soins restent ICI)"
     ),
     "Accept": "*/*",
     "Accept-Language": "fr-CA,fr;q=0.9",
