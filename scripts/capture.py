@@ -1,34 +1,56 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Capture des relevés d'urgence du MSSS — comité « Mes soins restent ICI ».
+Capture des relevés d'urgence — comité « Mes soins restent ICI ».
 
-Une seule exécution fait deux choses :
+POURQUOI CETTE VERSION
+----------------------
+Le 13 août 2026, msss.gouv.qc.ca a refusé toutes les requêtes venant de
+GitHub Actions : HTTP 403, page nginx nue, refus identique avec des en-têtes
+de navigateur complets et avec des en-têtes de client générique. Un refus
+insensible aux en-têtes est un blocage d'adresse IP, pas un filtre : aucun
+ajustement ne le contournera depuis un centre de données.
 
-  1. CSV HORAIRE — téléchargé à chaque passage. Le fichier est écrasé toutes
-     les heures à la source ; ce qui n'est pas capté est perdu. Classé sous
-     son heure d'extraction, jamais réécrit.
+Les mêmes données sont diffusées sur Données Québec, le portail de données
+ouvertes du gouvernement, sous licence CC-BY 4.0 — un site conçu pour l'accès
+automatisé. C'est là que ce script puise désormais.
 
-  2. RELEVÉ QUOTIDIEN (PDF) — téléchargé une fois par jour seulement, après
-     sa régénération de 11 h 45. S'il a déjà été capté aujourd'hui, on passe.
+CE QUI EST CAPTÉ
+----------------
+  1. FICHIER HORAIRE — patients sur civière, +24 h, +48 h, civières
+     fonctionnelles, par installation, avec le numéro de permis. Écrasé toutes
+     les heures à la source : ce qui n'est pas capté est perdu.
+  2. FICHIER HORAIRE AVEC PERSONNES PRÉSENTES — même maille, colonne de plus.
+  3. FICHIER CUMULATIF (BDCU) — par installation, par période financière, avec
+     le portrait des quatre dernières années financières. Il ne change qu'aux
+     périodes financières : on le vérifie chaque jour et on l'archive
+     seulement s'il a bougé. C'est le seul historique d'avant la collecte.
 
-Le point important est la VALIDATION. Les deux fichiers peuvent être servis
-dans un état dégradé :
-  - le relevé quotidien a déjà été diffusé sous forme de gabarit, avec ses
-    champs de fusion non résolus (&jour. &mois. &annee.) et aucune donnée ;
-  - le CSV peut être tronqué ou vide pendant sa régénération.
-Un fichier qui ne passe pas la validation n'est PAS archivé : on ressort en
-code 0, le passage suivant réessaiera. Archiver un gabarit vide pendant des
-semaines en croyant accumuler des données serait le pire des scénarios.
+CE QUI N'EST PAS CAPTÉ ICI
+--------------------------
+Le relevé quotidien en PDF (visites totales, taux d'occupation, moyennes des
+cinq dernières semaines avec la colonne « année précédente ») n'existe que
+sur msss.gouv.qc.ca, donc hors d'atteinte depuis GitHub. Mettre
+CAPTURER_PDF_QUOTIDIEN à True pour le récupérer en exécutant ce script depuis
+un poste sur adresse résidentielle, où le 403 ne se produit pas.
+
+VALIDATION
+----------
+Un fichier qui ne passe pas la validation n'est PAS archivé ; le passage
+suivant réessaie. Archiver un fichier vide ou tronqué pendant des semaines en
+croyant accumuler des données serait le pire des scénarios.
 
 Usage :
-    python3 scripts/capture.py            # capture normale
-    python3 scripts/capture.py --dry-run  # télécharge et valide sans écrire
+    python3 scripts/capture.py
+    python3 scripts/capture.py --dry-run          # valide sans rien écrire
+    python3 scripts/capture.py --avec-pdf         # force le PDF quotidien
 """
 
 import argparse
 import csv
+import hashlib
 import io
+import json
 import os
 import re
 import sys
@@ -38,238 +60,270 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from extraire_releve_quotidien import extraire as extraire_quotidien  # noqa: E402
 
-# ── Sources ────────────────────────────────────────────────────────────────
-BASE = "https://msss.gouv.qc.ca/professionnels/statistiques/documents/urgences/"
-URL_CSV_HORAIRE = BASE + "Releve_horaire_urgences_7jours.csv"
-URL_PDF_QUOTIDIEN = BASE + "Rap_Quotid_SituatUrgence1.pdf"
-URL_PDF_HORAIRE = BASE + "Rap_horaire_SituatUrgence1.pdf"
+# ── Données Québec (CKAN) ──────────────────────────────────────────────────
+CKAN = "https://www.donneesquebec.ca/recherche"
 
-# Page d'ou proviennent normalement les liens : certains pare-feu applicatifs
-# refusent une requete sans Referer coherent.
-PAGE_REFERENTE = ("https://msss.gouv.qc.ca/professionnels/"
-                  "statistiques-donnees-services-sante-services-sociaux/donnees-urgences/")
+# Identifiants des ressources, relevés sur les fiches de Données Québec.
+RES_HORAIRE = "a9272cc9-8234-40d1-9806-9f6b4c75c20d"
+RES_HORAIRE_NBPERS = "b256f87f-40ec-4c79-bdba-a23e9c50e741"
+# Le fichier cumulatif est retrouvé par le nom de son jeu : son identifiant de
+# ressource n'a pas été relevé, et le demander au portail évite de le figer.
+JEU_CUMULATIF = "fichier-cumulatif-des-donnees-des-urgences"
+
+# Relevé quotidien en PDF — inaccessible depuis un centre de données.
+URL_PDF_QUOTIDIEN = ("https://msss.gouv.qc.ca/professionnels/statistiques/"
+                     "documents/urgences/Rap_Quotid_SituatUrgence1.pdf")
+CAPTURER_PDF_QUOTIDIEN = False
 
 # ATTENTION : les en-tetes HTTP doivent etre encodables en latin-1. Un tiret
 # cadratin ou une lettre accentuee ici fait planter requests avec une
 # UnicodeEncodeError avant meme le telechargement. Garder ces valeurs en ASCII.
-#
-# Le premier essai du 13 aout 2026 depuis GitHub Actions a recu un HTTP 403 sur
-# les deux fichiers, alors que les memes URL repondent depuis un navigateur.
-# Deux causes possibles : un User-Agent juge non conforme (le notre portait un
-# suffixe entre parentheses, ce qu'aucun navigateur reel n'ajoute), ou un
-# blocage par reputation d'adresse IP. On presente donc un jeu d'en-tetes de
-# navigateur complet et rigoureusement standard.
 ENTETES = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
                    "Chrome/127.0.0.0 Safari/537.36"),
-    "Accept": ("text/html,application/xhtml+xml,application/xml;q=0.9,"
-               "image/avif,image/webp,application/pdf,*/*;q=0.8"),
-    "Accept-Language": "fr-CA,fr-FR;q=0.9,fr;q=0.8,en-US;q=0.7,en;q=0.6",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": PAGE_REFERENTE,
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "same-origin",
-    "Sec-Fetch-User": "?1",
-    "Connection": "keep-alive",
+    "Accept": "text/csv,application/json,*/*;q=0.8",
+    "Accept-Language": "fr-CA,fr;q=0.9,en;q=0.5",
 }
 
-# Repli si le premier jeu est refuse : un client generique, sans Sec-Fetch.
-ENTETES_REPLI = {
-    "User-Agent": "curl/8.5.0",
-    "Accept": "*/*",
-}
-
-DELAI = 60          # secondes
+DELAI = 90          # secondes
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_HORAIRE = RACINE / "data" / "horaire"
+DOSSIER_NBPERS = RACINE / "data" / "horaire_nbpers"
+DOSSIER_CUMULATIF = RACINE / "data" / "cumulatif"
 DOSSIER_QUOTIDIEN = RACINE / "data" / "quotidien"
 
-# ── Seuils de validation ───────────────────────────────────────────────────
-# Le CSV portait 120 installations le 12 août 2026. On refuse un fichier
-# nettement plus court : c'est le signe d'une régénération en cours.
-MIN_LIGNES_CSV = 90
-# Le relevé quotidien portait 98 installations + 15 régions au test du 7 août.
+# Le fichier horaire portait 120 installations le 12 août 2026. On refuse un
+# fichier nettement plus court : signe d'une régénération en cours.
+MIN_LIGNES = 90
 MIN_INSTALLATIONS_PDF = 70
-# Champs de fusion d'un gabarit non renseigné.
 MARQUEURS_GABARIT = ("&jour.", "&mois.", "&annee.", "&jr_m_v")
 
 FUSEAU_MONTREAL = timezone(timedelta(hours=-4))  # EDT ; EST en hiver, sans effet ici
 
 
 def maintenant_montreal():
-    """Heure locale approximative. Sert uniquement à dater les captures et à
-    savoir si le relevé quotidien du jour est déjà pris — une heure d'écart
-    en période de changement d'heure n'a aucune conséquence ici."""
     return datetime.now(timezone.utc).astimezone(FUSEAU_MONTREAL)
 
 
 def journal(niveau, message):
     horodatage = maintenant_montreal().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{horodatage}] {niveau:12s} {message}", flush=True)
+    print(f"[{horodatage}] {niveau:16s} {message}", flush=True)
 
 
-def telecharger(url):
-    """Retourne (contenu_binaire, None) ou (None, message_d_erreur).
-
-    Deux tentatives avec des en-têtes différents : d'abord un jeu de navigateur
-    complet, puis un client générique. Un pare-feu applicatif peut refuser
-    l'un et accepter l'autre. En cas de refus, on journalise ce que le serveur
-    renvoie (serveur, type de contenu, début du corps) — sans ce détail, un 403
-    ne dit pas s'il vient d'un filtre d'en-têtes ou d'un blocage d'adresse IP.
-    """
-    dernier = ""
-    for tentative, entetes in enumerate((ENTETES, ENTETES_REPLI), start=1):
-        try:
-            with requests.Session() as session:
-                # Une visite préalable de la page référente donne au serveur un
-                # parcours de navigation plausible et récupère ses témoins.
-                if tentative == 1:
-                    try:
-                        session.get(PAGE_REFERENTE, headers=entetes, timeout=DELAI)
-                    except requests.RequestException:
-                        pass  # échec sans conséquence : on tente le fichier quand même
-                r = session.get(url, headers=entetes, timeout=DELAI,
-                                allow_redirects=True)
-        except requests.RequestException as err:
-            dernier = f"échec réseau : {err}"
-            continue
-
-        if r.status_code == 200 and r.content:
-            if tentative > 1:
-                journal("REPLI", f"accepté au {tentative}e jeu d'en-têtes")
-            return r.content, None
-
-        if r.status_code == 200:
-            dernier = "réponse vide"
-        else:
-            apercu = (r.text or "")[:160].replace("\n", " ").strip()
-            dernier = (f"code HTTP {r.status_code} (tentative {tentative}) — "
-                       f"serveur « {r.headers.get('Server', 'non déclaré')} », "
-                       f"type « {r.headers.get('Content-Type', 'non déclaré')} », "
-                       f"début du corps : {apercu or 'vide'}")
-            journal("DIAGNOSTIC", dernier)
-
-    return None, dernier
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# 1. CSV HORAIRE
-# ══════════════════════════════════════════════════════════════════════════
-
-def valider_csv(contenu):
-    """Retourne (infos, None) si le fichier est exploitable, sinon (None, motif).
-
-    infos contient l'heure d'extraction et l'horodatage de mise à jour, qui
-    servent à nommer le fichier et à ne pas archiver deux fois la même heure.
-    """
+def obtenir(url, session=None, **kw):
+    """GET simple. Retourne (reponse, None) ou (None, motif lisible)."""
+    client = session or requests
     try:
-        texte = contenu.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        try:
-            texte = contenu.decode("latin-1")
-        except Exception as err:
-            return None, f"encodage illisible : {err}"
+        r = client.get(url, headers=ENTETES, timeout=DELAI, **kw)
+    except requests.RequestException as err:
+        return None, f"échec réseau : {err}"
+    if r.status_code != 200:
+        apercu = (r.text or "")[:120].replace("\n", " ").strip()
+        return None, f"code HTTP {r.status_code} — {apercu or 'corps vide'}"
+    if not r.content:
+        return None, "réponse vide"
+    return r, None
 
-    lignes = [l for l in texte.splitlines() if l.strip()]
-    if len(lignes) < 2:
-        return None, "fichier sans données"
+
+# ══════════════════════════════════════════════════════════════════════════
+# Récupération d'une ressource CKAN
+# ══════════════════════════════════════════════════════════════════════════
+
+def resource_id_du_jeu(nom_jeu, motif_format="CSV"):
+    """Demande au portail les ressources d'un jeu et rend l'identifiant de la
+    première au format voulu. Évite de figer un identifiant qui pourrait
+    changer si le diffuseur remplace la ressource."""
+    url = f"{CKAN}/api/3/action/package_show?id={nom_jeu}"
+    r, err = obtenir(url)
+    if err:
+        return None, f"fiche du jeu « {nom_jeu} » illisible — {err}"
+    try:
+        paquet = r.json()["result"]
+    except (ValueError, KeyError) as err:
+        return None, f"réponse inattendue du portail : {err}"
+    for res in paquet.get("resources", []):
+        if str(res.get("format", "")).upper() == motif_format.upper():
+            return res.get("id"), None
+    return None, f"aucune ressource {motif_format} dans « {nom_jeu} »"
+
+
+def telecharger_ressource(resource_id):
+    """Récupère une ressource du datastore de Données Québec, en CSV.
+
+    Deux voies, essayées dans l'ordre :
+      1. le vidage direct du datastore, qui rend le CSV complet d'un coup ;
+      2. l'interrogation paginée du datastore, reconstituée en CSV.
+    La seconde sert de filet si le vidage est désactivé ou trop lourd.
+    """
+    with requests.Session() as session:
+        url_vidage = f"{CKAN}/datastore/dump/{resource_id}?format=csv&bom=true"
+        r, err = obtenir(url_vidage, session=session)
+        if r is not None:
+            return r.content, None
+        journal("VIDAGE-ECHEC", f"{resource_id[:8]} — {err} ; essai par pagination")
+
+        lignes, colonnes, decalage = [], None, 0
+        while True:
+            url = (f"{CKAN}/api/3/action/datastore_search"
+                   f"?resource_id={resource_id}&limit=10000&offset={decalage}")
+            r, err = obtenir(url, session=session)
+            if err:
+                return None, f"pagination interrompue à {decalage} — {err}"
+            try:
+                res = r.json()["result"]
+            except (ValueError, KeyError) as err:
+                return None, f"réponse inattendue à {decalage} — {err}"
+
+            enregistrements = res.get("records", [])
+            if colonnes is None:
+                # On écarte la colonne technique _id ajoutée par le portail.
+                colonnes = [c["id"] for c in res.get("fields", []) if c["id"] != "_id"]
+            lignes.extend(enregistrements)
+            if len(enregistrements) < 10000:
+                break
+            decalage += len(enregistrements)
+            if decalage > 200000:      # garde-fou : jamais atteint en pratique
+                break
+
+        if not lignes or not colonnes:
+            return None, "datastore vide"
+
+        tampon = io.StringIO()
+        w = csv.DictWriter(tampon, fieldnames=colonnes, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(lignes)
+        return tampon.getvalue().encode("utf-8-sig"), None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Validation et nommage
+# ══════════════════════════════════════════════════════════════════════════
+
+def lire_csv(contenu):
+    """Décode et rend (colonnes, rangées) ou lève ValueError."""
+    for encodage in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            texte = contenu.decode(encodage)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError("encodage illisible")
 
     lecteur = csv.DictReader(io.StringIO(texte))
-    # Les en-têtes contiennent des tabulations et des espaces de remplissage.
     if not lecteur.fieldnames:
-        return None, "en-tête absent"
-    champs = {re.sub(r"\s+", "", c or ""): c for c in lecteur.fieldnames}
+        raise ValueError("en-tête absent")
+    return lecteur.fieldnames, list(lecteur)
 
-    def champ(fragment):
-        for propre, brut in champs.items():
-            if fragment in propre:
-                return brut
-        return None
 
-    col_installation = champ("Nom_installation")
-    col_heure = champ("Heure_de_l")
-    col_maj = champ("Mise_a_jour")
-    if not col_installation or not col_heure:
-        return None, f"colonnes attendues absentes ({lecteur.fieldnames})"
+def colonne_contenant(colonnes, fragment):
+    """Retrouve une colonne malgré les tabulations, espaces et accents que la
+    source insère dans ses en-têtes."""
+    cible = fragment.lower()
+    for c in colonnes:
+        if cible in re.sub(r"\s+", "", (c or "")).lower():
+            return c
+    return None
 
-    rangs = [r for r in lecteur if (r.get(col_installation) or "").strip()]
-    if len(rangs) < MIN_LIGNES_CSV:
-        return None, f"seulement {len(rangs)} installation(s), minimum {MIN_LIGNES_CSV}"
 
-    heures = {(r.get(col_heure) or "").strip() for r in rangs}
-    heures.discard("")
-    if not heures:
-        return None, "aucune heure d'extraction"
+def valider(contenu, minimum=MIN_LIGNES):
+    """Rend (infos, None) si le fichier est exploitable, sinon (None, motif)."""
+    try:
+        colonnes, rangs = lire_csv(contenu)
+    except ValueError as err:
+        return None, str(err)
 
-    maj = ""
-    if col_maj:
-        valeurs = {(r.get(col_maj) or "").strip() for r in rangs}
+    col_inst = colonne_contenant(colonnes, "nom_installation") or \
+        colonne_contenant(colonnes, "installation")
+    if not col_inst:
+        return None, f"colonne d'installation absente ({colonnes[:6]})"
+
+    rangs = [r for r in rangs if (r.get(col_inst) or "").strip()]
+    if len(rangs) < minimum:
+        return None, f"seulement {len(rangs)} ligne(s), minimum {minimum}"
+
+    def derniere_valeur(fragment):
+        col = colonne_contenant(colonnes, fragment)
+        if not col:
+            return ""
+        valeurs = {(r.get(col) or "").strip() for r in rangs}
         valeurs.discard("")
-        maj = sorted(valeurs)[-1] if valeurs else ""
+        return sorted(valeurs)[-1] if valeurs else ""
 
     return {
-        "installations": len(rangs),
-        "heure_extraction": sorted(heures)[-1],
-        "mise_a_jour": maj,
+        "lignes": len(rangs),
+        "installations": len({(r.get(col_inst) or "").strip() for r in rangs}),
+        "mise_a_jour": derniere_valeur("mise_a_jour"),
+        "heure_extraction": derniere_valeur("heure_de_l"),
+        "empreinte": hashlib.sha256(contenu).hexdigest()[:12],
     }, None
 
 
-def cle_horaire(infos):
-    """Nom de fichier fondé sur l'horodatage DE LA SOURCE, jamais sur l'heure
-    d'exécution. Si le workflow tourne en retard ou deux fois, on retombe sur
-    le même nom et on n'archive pas de doublon."""
-    maj = infos.get("mise_a_jour") or ""
-    m = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", maj)
+def horodatage_fichier(infos):
+    """Nom fondé sur l'horodatage DE LA SOURCE, jamais sur l'heure d'exécution.
+    Une exécution en retard, rejouée ou déclenchée à la main retombe sur le
+    même nom et n'archive pas de doublon. À défaut d'horodatage dans les
+    données, on se rabat sur l'empreinte du contenu — deux fichiers identiques
+    donnent alors le même nom."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})",
+                 infos.get("mise_a_jour") or "")
     if m:
         a, mo, j, h, mi = m.groups()
-        return a, mo, j, f"{h}{mi}"
-    # Repli : la date d'exécution avec l'heure d'extraction déclarée.
+        return a, mo, f"{a}-{mo}-{j}_{h}{mi}"
     n = maintenant_montreal()
-    h = re.sub(r"\D", "", infos.get("heure_extraction", ""))[:4] or n.strftime("%H%M")
-    return n.strftime("%Y"), n.strftime("%m"), n.strftime("%d"), h
+    return n.strftime("%Y"), n.strftime("%m"), f"{n:%Y-%m-%d}_{infos['empreinte']}"
 
 
-def capturer_csv_horaire(dry_run):
-    contenu, err = telecharger(URL_CSV_HORAIRE)
+# ══════════════════════════════════════════════════════════════════════════
+# Les trois captures
+# ══════════════════════════════════════════════════════════════════════════
+
+def capturer_ressource(etiquette, resource_id, dossier, prefixe, dry_run,
+                       minimum=MIN_LIGNES):
+    contenu, err = telecharger_ressource(resource_id)
     if err:
-        journal("HORAIRE-ECHEC", f"téléchargement impossible — {err}")
+        journal(f"{etiquette}-ECHEC", err)
         return False
 
-    infos, err = valider_csv(contenu)
+    infos, err = valider(contenu, minimum)
     if err:
-        journal("HORAIRE-REJET", f"fichier non conforme — {err}")
+        journal(f"{etiquette}-REJET", f"fichier non conforme — {err}")
         return False
 
-    annee, mois, jour, heure = cle_horaire(infos)
-    dossier = DOSSIER_HORAIRE / annee / mois
-    chemin = dossier / f"releve_horaire_{annee}-{mois}-{jour}_{heure}.csv"
+    annee, mois, cle = horodatage_fichier(infos)
+    chemin = dossier / annee / mois / f"{prefixe}_{cle}.csv"
 
     if chemin.exists():
-        journal("HORAIRE-DEJA", f"{chemin.name} déjà archivé — rien à faire")
+        journal(f"{etiquette}-DEJA", f"{chemin.name} déjà archivé")
         return False
 
-    journal("HORAIRE-OK",
-            f"{infos['installations']} installations, extraction {infos['heure_extraction']}, "
+    journal(f"{etiquette}-OK",
+            f"{infos['lignes']} lignes, {infos['installations']} installations, "
             f"mise à jour {infos['mise_a_jour'] or 'non déclarée'}")
 
     if dry_run:
         journal("DRY-RUN", f"aurait écrit {chemin.relative_to(RACINE)}")
         return False
 
-    dossier.mkdir(parents=True, exist_ok=True)
-    chemin.write_bytes(contenu)  # octets bruts : l'archive reste fidèle à la source
-    journal("HORAIRE-ECRIT", str(chemin.relative_to(RACINE)))
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_bytes(contenu)
+    journal(f"{etiquette}-ECRIT", str(chemin.relative_to(RACINE)))
     return True
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# 2. RELEVÉ QUOTIDIEN (PDF)
-# ══════════════════════════════════════════════════════════════════════════
+def capturer_cumulatif(dry_run):
+    """Le fichier cumulatif ne bouge qu'aux périodes financières. On le
+    vérifie chaque jour et on ne l'archive que s'il a changé — d'où le nommage
+    par empreinte du contenu."""
+    resource_id, err = resource_id_du_jeu(JEU_CUMULATIF)
+    if err:
+        journal("CUMUL-ECHEC", err)
+        return False
+    return capturer_ressource("CUMUL", resource_id, DOSSIER_CUMULATIF,
+                              "cumulatif_urgences", dry_run, minimum=50)
+
 
 MOIS_FR = {
     "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5,
@@ -278,38 +332,12 @@ MOIS_FR = {
 }
 
 
-def valider_pdf_quotidien(chemin_temporaire):
-    """Ouvre le PDF, refuse le gabarit non renseigné, retourne (date, nb_installations)."""
+def capturer_pdf_quotidien(dry_run):
+    """Ne fonctionne que depuis une adresse résidentielle : msss.gouv.qc.ca
+    refuse les centres de données."""
+    from extraire_releve_quotidien import extraire as extraire_quotidien
     import pdfplumber
 
-    with pdfplumber.open(chemin_temporaire) as pdf:
-        if len(pdf.pages) < 5:
-            return None, f"seulement {len(pdf.pages)} page(s)"
-        texte = "\n".join((p.extract_text() or "") for p in pdf.pages[:3])
-
-    for marqueur in MARQUEURS_GABARIT:
-        if marqueur in texte:
-            return None, ("gabarit non renseigné — champ de fusion "
-                          f"« {marqueur} » présent, la génération de 11 h 45 a échoué")
-
-    m = re.search(r"Mise à jour\s*:?\s*(\d{1,2})\s+([A-Za-zéûôàî]+)\s+(\d{4})", texte)
-    if not m:
-        return None, "date de mise à jour introuvable"
-    jour, mois_txt, annee = int(m.group(1)), m.group(2).lower(), int(m.group(3))
-    if mois_txt not in MOIS_FR:
-        return None, f"mois non reconnu : {mois_txt}"
-    date_rapport = datetime(annee, MOIS_FR[mois_txt], jour).date()
-
-    lignes, _ = extraire_quotidien(str(chemin_temporaire))
-    installations = {l["installation"] for l in lignes if l["niveau"] == "installation"}
-    if len(installations) < MIN_INSTALLATIONS_PDF:
-        return None, (f"seulement {len(installations)} installation(s) extraites, "
-                      f"minimum {MIN_INSTALLATIONS_PDF}")
-
-    return (date_rapport, lignes, installations), None
-
-
-def capturer_pdf_quotidien(dry_run):
     aujourdhui = maintenant_montreal().date()
     dossier = DOSSIER_QUOTIDIEN / f"{aujourdhui:%Y}"
     chemin_pdf = dossier / f"rap_quotid_{aujourdhui:%Y-%m-%d}.pdf"
@@ -318,43 +346,54 @@ def capturer_pdf_quotidien(dry_run):
     if chemin_pdf.exists():
         journal("QUOTID-DEJA", f"{chemin_pdf.name} déjà archivé aujourd'hui")
         return False
-
-    # Le relevé est régénéré à 11 h 45. Inutile d'insister avant.
     if maintenant_montreal().hour < 12:
-        journal("QUOTID-ATTENTE", "avant 12 h, le relevé du jour n'est pas encore régénéré")
+        journal("QUOTID-ATTENTE", "avant 12 h, le relevé du jour n'est pas régénéré")
         return False
 
-    contenu, err = telecharger(URL_PDF_QUOTIDIEN)
+    r, err = obtenir(URL_PDF_QUOTIDIEN)
     if err:
-        journal("QUOTID-ECHEC", f"téléchargement impossible — {err}")
+        journal("QUOTID-ECHEC", f"{err} (attendu depuis un centre de données)")
         return False
 
     temporaire = RACINE / ".rap_quotid_temporaire.pdf"
-    temporaire.write_bytes(contenu)
+    temporaire.write_bytes(r.content)
     try:
-        resultat, err = valider_pdf_quotidien(temporaire)
-        if err:
-            journal("QUOTID-REJET", f"{err} — non archivé, reprise au prochain passage")
-            return False
+        with pdfplumber.open(temporaire) as pdf:
+            if len(pdf.pages) < 5:
+                journal("QUOTID-REJET", f"seulement {len(pdf.pages)} page(s)")
+                return False
+            texte = "\n".join((p.extract_text() or "") for p in pdf.pages[:3])
 
-        date_rapport, lignes, installations = resultat
+        for marqueur in MARQUEURS_GABARIT:
+            if marqueur in texte:
+                journal("QUOTID-REJET",
+                        f"gabarit non renseigné — champ « {marqueur} » présent")
+                return False
+
+        m = re.search(r"Mise à jour\s*:?\s*(\d{1,2})\s+([A-Za-zéûôàî]+)\s+(\d{4})", texte)
+        if not m or m.group(2).lower() not in MOIS_FR:
+            journal("QUOTID-REJET", "date de mise à jour introuvable")
+            return False
+        date_rapport = datetime(int(m.group(3)), MOIS_FR[m.group(2).lower()],
+                                int(m.group(1))).date()
         if date_rapport != aujourdhui:
-            journal("QUOTID-ATTENTE",
-                    f"le relevé en ligne porte encore la date du {date_rapport} — "
-                    f"pas encore régénéré pour aujourd'hui")
+            journal("QUOTID-ATTENTE", f"le relevé porte encore la date du {date_rapport}")
             return False
 
-        journal("QUOTID-OK",
-                f"relevé du {date_rapport}, {len(installations)} installations, "
-                f"{len(lignes)} lignes extraites")
+        lignes, _ = extraire_quotidien(str(temporaire))
+        installations = {l["installation"] for l in lignes if l["niveau"] == "installation"}
+        if len(installations) < MIN_INSTALLATIONS_PDF:
+            journal("QUOTID-REJET", f"seulement {len(installations)} installations")
+            return False
 
+        journal("QUOTID-OK", f"relevé du {date_rapport}, {len(installations)} "
+                             f"installations, {len(lignes)} lignes")
         if dry_run:
-            journal("DRY-RUN", f"aurait écrit {chemin_pdf.name} et {chemin_csv.name}")
+            journal("DRY-RUN", f"aurait écrit {chemin_pdf.name}")
             return False
 
         dossier.mkdir(parents=True, exist_ok=True)
-        chemin_pdf.write_bytes(contenu)
-
+        chemin_pdf.write_bytes(r.content)
         champs = ["date_rapport", "date", "region_code", "region", "installation",
                   "niveau", "indicateur", "valeur", "moy_5sem_an_courant",
                   "moy_5sem_an_precedent", "civieres_fonctionnelles", "source"]
@@ -362,7 +401,6 @@ def capturer_pdf_quotidien(dry_run):
             w = csv.DictWriter(f, fieldnames=champs)
             w.writeheader()
             w.writerows(lignes)
-
         journal("QUOTID-ECRIT", f"{chemin_pdf.name} + {chemin_csv.name}")
         return True
     finally:
@@ -372,23 +410,29 @@ def capturer_pdf_quotidien(dry_run):
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description="Capture des relevés d'urgence")
     ap.add_argument("--dry-run", action="store_true",
                     help="télécharge et valide sans rien écrire")
-    ap.add_argument("--horaire-seulement", action="store_true")
-    ap.add_argument("--quotidien-seulement", action="store_true")
+    ap.add_argument("--avec-pdf", action="store_true",
+                    help="tente aussi le relevé quotidien du MSSS "
+                         "(ne fonctionne que depuis une adresse résidentielle)")
     args = ap.parse_args()
 
+    journal("DEBUT", f"source : Données Québec ({CKAN})")
     ecritures = 0
-    if not args.quotidien_seulement:
-        ecritures += int(capturer_csv_horaire(args.dry_run))
-    if not args.horaire_seulement:
+
+    ecritures += int(capturer_ressource(
+        "HORAIRE", RES_HORAIRE, DOSSIER_HORAIRE, "releve_horaire", args.dry_run))
+    ecritures += int(capturer_ressource(
+        "NBPERS", RES_HORAIRE_NBPERS, DOSSIER_NBPERS, "releve_nbpers", args.dry_run))
+    ecritures += int(capturer_cumulatif(args.dry_run))
+
+    if CAPTURER_PDF_QUOTIDIEN or args.avec_pdf:
         ecritures += int(capturer_pdf_quotidien(args.dry_run))
 
     # Code 0 même sans écriture : un rejet de validation ou un fichier déjà
     # présent sont des situations normales, pas des échecs du workflow.
     journal("BILAN", f"{ecritures} fichier(s) archivé(s)")
-    # Transmis au workflow pour qu'il ne commite que s'il y a du neuf.
     sortie = os.environ.get("GITHUB_OUTPUT")
     if sortie:
         with open(sortie, "a", encoding="utf-8") as f:
