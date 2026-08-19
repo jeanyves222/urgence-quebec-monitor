@@ -14,7 +14,7 @@ name: Capture des relevés d'urgence
 
 on:
   schedule:
-    - cron: "20 * * * *"   # toutes les heures, à la 20e minute (après la mise à jour de la source)
+    - cron: "10,25,40,55 * * * *"   # quatre fois par heure, décalé de l'archivage (5,20,35,50)
   workflow_dispatch:        # déclenchement manuel depuis l'onglet Actions
 
 # Empêche deux exécutions de se marcher dessus au moment du push.
