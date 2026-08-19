@@ -1,0 +1,69 @@
+name: Archive de la page Index Santé
+
+# Distinct du workflow de capture Données Québec : s'il échoue, l'autre
+# continue sans s'en apercevoir.
+#
+# Quatre passages par heure plutôt qu'un : GitHub saute régulièrement des
+# exécutions planifiées, et la source écrase sa page à chaque rafraîchissement.
+# Le dépôt étant public, les minutes ne sont pas plafonnées, et le nommage par
+# l'horodatage déclaré dans la page empêche tout doublon — les passages
+# supplémentaires ne coûtent donc rien d'autre que du temps machine gratuit.
+
+on:
+  schedule:
+    - cron: "5,20,35,50 * * * *"
+  workflow_dispatch:
+
+# MÊME groupe que le workflow de capture : les deux poussent dans le dépôt, et
+# deux poussées simultanées se marcheraient dessus. Ils s'attendent l'un l'autre.
+concurrency:
+  group: capture-urgences
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  archiver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements-capture.txt
+
+      - name: Archiver la page
+        id: archive
+        run: python3 scripts/archiver_indexsante.py
+
+      - name: Committer et pousser si du neuf
+        if: steps.archive.outputs.ecritures == '1'
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/indexsante/
+          if git diff --cached --quiet; then
+            echo "Rien à committer."
+            exit 0
+          fi
+          git commit -m "Archive Index Santé — $(date -u '+%Y-%m-%d %H:%M UTC')"
+          for tentative in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push refusé (tentative $tentative) — rebase et nouvel essai."
+            git pull --rebase --autostash
+            sleep 5
+          done
+          echo "::error::Push impossible après trois tentatives."
+          exit 1
