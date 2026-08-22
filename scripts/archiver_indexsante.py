@@ -42,7 +42,8 @@ import hashlib
 import os
 import re
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import requests
@@ -76,7 +77,11 @@ MOIS_FR = {
     "octobre": 10, "novembre": 11, "décembre": 12, "decembre": 12,
 }
 
-FUSEAU_MONTREAL = timezone(timedelta(hours=-4))  # EDT ; EST en hiver, sans effet ici
+# Fuseau NOMMÉ, jamais un décalage fixe. Le Québec passe à l'heure normale
+# le 1er novembre 2026 : un décalage figé à -4 aurait alors faussé de
+# soixante minutes le retard calculé, c'est-à-dire précisément la mesure
+# de fiabilité de la source. « America/Montreal » bascule tout seul.
+FUSEAU_MONTREAL = ZoneInfo("America/Montreal")
 
 CHAMPS_INDEX = [
     "capture_utc", "maj_source", "maj_complete", "retard_min",
