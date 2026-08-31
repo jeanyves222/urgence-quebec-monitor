@@ -3,15 +3,15 @@ name: Archive de la page Index Santé
 # Distinct du workflow de capture Données Québec : s'il échoue, l'autre
 # continue sans s'en apercevoir.
 #
-# Quatre passages par heure plutôt qu'un : GitHub saute régulièrement des
-# exécutions planifiées, et la source écrase sa page à chaque rafraîchissement.
-# Le dépôt étant public, les minutes ne sont pas plafonnées, et le nommage par
-# l'horodatage déclaré dans la page empêche tout doublon — les passages
-# supplémentaires ne coûtent donc rien d'autre que du temps machine gratuit.
+# Deux passages par heure, décalés de ceux de la capture (10 et 40). Quatre
+# passages avaient été essayés du 19 au 26 août : GitHub a fini par ne plus
+# lancer qu'une exécution sur trente. Demander moins en obtient davantage.
+# Le nommage par l'horodatage déclaré dans la page empêche tout doublon, donc
+# le second passage ne coûte rien lorsqu'il ne trouve rien de neuf.
 
 on:
   schedule:
-    - cron: "5,20,35,50 * * * *"
+    - cron: "25,55 * * * *"
   workflow_dispatch:
 
 # MÊME groupe que le workflow de capture : les deux poussent dans le dépôt, et
