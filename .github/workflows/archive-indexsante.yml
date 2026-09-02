@@ -1,50 +1,42 @@
 name: Archive de la page Index Santé
-
 # Distinct du workflow de capture Données Québec : s'il échoue, l'autre
 # continue sans s'en apercevoir.
 #
-# Deux passages par heure, décalés de ceux de la capture (10 et 40). Quatre
-# passages avaient été essayés du 19 au 26 août : GitHub a fini par ne plus
-# lancer qu'une exécution sur trente. Demander moins en obtient davantage.
+# Une seule fois par heure, à la minute 55 (10 min après la publication de
+# H:45), décalée de 5 minutes de la capture (50). Quatre passages avaient
+# été essayés du 19 au 26 août, puis deux du 31 août au 2 septembre : dans
+# les deux cas GitHub a fini par ne plus lancer qu'une fraction des
+# exécutions planifiées. Demander moins en obtient davantage.
 # Le nommage par l'horodatage déclaré dans la page empêche tout doublon, donc
-# le second passage ne coûte rien lorsqu'il ne trouve rien de neuf.
-
+# un passage qui ne trouve rien de neuf ne coûte rien.
 on:
   schedule:
-    - cron: "25,55 * * * *"
+    - cron: "55 * * * *"
   workflow_dispatch:
-
 # MÊME groupe que le workflow de capture : les deux poussent dans le dépôt, et
 # deux poussées simultanées se marcheraient dessus. Ils s'attendent l'un l'autre.
 concurrency:
   group: capture-urgences
   cancel-in-progress: false
-
 permissions:
   contents: write
-
 jobs:
   archiver:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
-
       - name: Installer Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       - name: Installer les dépendances
         run: pip install -r requirements-capture.txt
-
       - name: Archiver la page
         id: archive
         run: python3 scripts/archiver_indexsante.py
-
       - name: Committer et pousser si du neuf
         if: steps.archive.outputs.ecritures == '1'
         run: |
