@@ -3,17 +3,22 @@ name: Capture des relevés d'urgence
 # passage, le relevé quotidien seulement s'il n'a pas déjà été pris aujourd'hui.
 # Un seul commit par passage, donc aucune course entre deux workflows.
 #
-# Le cron de GitHub est en UTC et peut être retardé de quelques minutes, parfois
-# davantage aux heures rondes de forte charge. Sans importance ici : le nom du
-# fichier archivé vient de l'horodatage DE LA SOURCE, pas de l'heure d'exécution.
+# Déclenchement EXTERNE uniquement (cron-job.org appelle l'API workflow_dispatch
+# à la minute 50 de chaque heure) depuis le 6 septembre 2026. Le cron GitHub
+# interne a été retiré : le faire cohabiter avec le déclencheur externe créait
+# un risque de double exécution sur la même donnée source, avec conflit de
+# fusion Git en cas de collision (voir archive-indexsante.yml, incident du
+# 6 septembre). Un seul chemin de déclenchement élimine ce risque.
+#
+# Le nom du fichier archivé vient de l'horodatage DE LA SOURCE, pas de l'heure
+# d'exécution, donc un déclenchement en retard ne cause pas de doublon tant
+# qu'il n'y a qu'un seul appel par donnée source.
 #
 # Le passage horaire sert aussi de garde-fou pour le relevé quotidien : s'il est
 # encore en gabarit ou pas régénéré à 12 h, le passage de 13 h réessaiera, et
 # ainsi de suite jusqu'à la fin de la journée.
 on:
-  schedule:
-    - cron: "50 * * * *"   # une fois par heure, 5 min après la publication de H:45
-  workflow_dispatch:        # déclenchement manuel depuis l'onglet Actions
+  workflow_dispatch:        # déclenché par cron-job.org (minute 50) ou manuellement depuis l'onglet Actions
 # Empêche deux exécutions de se marcher dessus au moment du push.
 concurrency:
   group: capture-urgences
