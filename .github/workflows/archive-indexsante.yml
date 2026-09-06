@@ -1,27 +1,32 @@
-name: Archive de la page Index Santé
-# Distinct du workflow de capture Données Québec : s'il échoue, l'autre
-# continue sans s'en apercevoir.
+name: Capture des relevés d'urgence
+# Un seul workflow pour les deux fichiers : le CSV horaire est capté à chaque
+# passage, le relevé quotidien seulement s'il n'a pas déjà été pris aujourd'hui.
+# Un seul commit par passage, donc aucune course entre deux workflows.
 #
-# Une seule fois par heure, à la minute 55 (10 min après la publication de
-# H:45), décalée de 5 minutes de la capture (50). Quatre passages avaient
-# été essayés du 19 au 26 août, puis deux du 31 août au 2 septembre : dans
-# les deux cas GitHub a fini par ne plus lancer qu'une fraction des
-# exécutions planifiées. Demander moins en obtient davantage.
-# Le nommage par l'horodatage déclaré dans la page empêche tout doublon, donc
-# un passage qui ne trouve rien de neuf ne coûte rien.
+# Déclenchement EXTERNE uniquement (cron-job.org appelle l'API workflow_dispatch
+# à la minute 50 de chaque heure) depuis le 6 septembre 2026. Le cron GitHub
+# interne a été retiré : le faire cohabiter avec le déclencheur externe créait
+# un risque de double exécution sur la même donnée source, avec conflit de
+# fusion Git en cas de collision (voir archive-indexsante.yml, incident du
+# 6 septembre). Un seul chemin de déclenchement élimine ce risque.
+#
+# Le nom du fichier archivé vient de l'horodatage DE LA SOURCE, pas de l'heure
+# d'exécution, donc un déclenchement en retard ne cause pas de doublon tant
+# qu'il n'y a qu'un seul appel par donnée source.
+#
+# Le passage horaire sert aussi de garde-fou pour le relevé quotidien : s'il est
+# encore en gabarit ou pas régénéré à 12 h, le passage de 13 h réessaiera, et
+# ainsi de suite jusqu'à la fin de la journée.
 on:
-  schedule:
-    - cron: "55 * * * *"
-  workflow_dispatch:
-# MÊME groupe que le workflow de capture : les deux poussent dans le dépôt, et
-# deux poussées simultanées se marcheraient dessus. Ils s'attendent l'un l'autre.
+  workflow_dispatch:        # déclenché par cron-job.org (minute 50) ou manuellement depuis l'onglet Actions
+# Empêche deux exécutions de se marcher dessus au moment du push.
 concurrency:
   group: capture-urgences
   cancel-in-progress: false
 permissions:
-  contents: write
+  contents: write           # nécessaire pour committer les fichiers captés
 jobs:
-  archiver:
+  capturer:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -34,21 +39,22 @@ jobs:
           cache: pip
       - name: Installer les dépendances
         run: pip install -r requirements-capture.txt
-      - name: Archiver la page
-        id: archive
-        run: python3 scripts/archiver_indexsante.py
+      - name: Capturer les relevés
+        id: capture
+        run: python3 scripts/capture.py
       - name: Committer et pousser si du neuf
-        if: steps.archive.outputs.ecritures == '1'
+        if: steps.capture.outputs.ecritures != '0'
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/indexsante/
+          git add data/
           if git diff --cached --quiet; then
             echo "Rien à committer."
             exit 0
           fi
-          git commit -m "Archive Index Santé — $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git commit -m "Capture automatique — $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Une autre exécution a pu pousser entre-temps : on rejoue par-dessus.
           for tentative in 1 2 3; do
             if git push; then
               exit 0
