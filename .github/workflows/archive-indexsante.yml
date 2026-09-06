@@ -1,32 +1,33 @@
-name: Capture des relevés d'urgence
-# Un seul workflow pour les deux fichiers : le CSV horaire est capté à chaque
-# passage, le relevé quotidien seulement s'il n'a pas déjà été pris aujourd'hui.
-# Un seul commit par passage, donc aucune course entre deux workflows.
+name: Archive de la page Index Santé
+# Distinct du workflow de capture Données Québec : s'il échoue, l'autre
+# continue sans s'en apercevoir.
 #
 # Déclenchement EXTERNE uniquement (cron-job.org appelle l'API workflow_dispatch
-# à la minute 50 de chaque heure) depuis le 6 septembre 2026. Le cron GitHub
-# interne a été retiré : le faire cohabiter avec le déclencheur externe créait
-# un risque de double exécution sur la même donnée source, avec conflit de
-# fusion Git en cas de collision (voir archive-indexsante.yml, incident du
-# 6 septembre). Un seul chemin de déclenchement élimine ce risque.
+# à la minute 55 de chaque heure, 5 minutes après capture.yml) depuis le
+# 6 septembre 2026. Le cron GitHub interne a été retiré après l'incident du
+# 6 septembre : les deux déclencheurs (interne et externe) ont capté la même
+# publication source à quelques secondes d'écart, produit deux commits pour
+# le même nom de fichier, et provoqué un conflit de fusion Git (add/add) que
+# la boucle de reprise ne peut pas résoudre automatiquement — le portrait de
+# 16h45 a été perdu ce jour-là. Un seul chemin de déclenchement élimine ce
+# risque de collision.
 #
-# Le nom du fichier archivé vient de l'horodatage DE LA SOURCE, pas de l'heure
-# d'exécution, donc un déclenchement en retard ne cause pas de doublon tant
-# qu'il n'y a qu'un seul appel par donnée source.
-#
-# Le passage horaire sert aussi de garde-fou pour le relevé quotidien : s'il est
-# encore en gabarit ou pas régénéré à 12 h, le passage de 13 h réessaiera, et
-# ainsi de suite jusqu'à la fin de la journée.
+# Historique de cadence : 4 passages/heure du 19 au 26 août, puis 2/heure
+# jusqu'au 2 septembre — dans les deux cas GitHub a fini par ne lancer qu'une
+# fraction des exécutions planifiées. Demander moins en obtient davantage.
+# Le nommage par l'horodatage déclaré dans la page empêche tout doublon, donc
+# un passage qui ne trouve rien de neuf ne coûte rien.
 on:
-  workflow_dispatch:        # déclenché par cron-job.org (minute 50) ou manuellement depuis l'onglet Actions
-# Empêche deux exécutions de se marcher dessus au moment du push.
+  workflow_dispatch:        # déclenché par cron-job.org (minute 55) ou manuellement depuis l'onglet Actions
+# MÊME groupe que le workflow de capture : les deux poussent dans le dépôt, et
+# deux poussées simultanées se marcheraient dessus. Ils s'attendent l'un l'autre.
 concurrency:
   group: capture-urgences
   cancel-in-progress: false
 permissions:
-  contents: write           # nécessaire pour committer les fichiers captés
+  contents: write
 jobs:
-  capturer:
+  archiver:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -39,22 +40,21 @@ jobs:
           cache: pip
       - name: Installer les dépendances
         run: pip install -r requirements-capture.txt
-      - name: Capturer les relevés
-        id: capture
-        run: python3 scripts/capture.py
+      - name: Archiver la page
+        id: archive
+        run: python3 scripts/archiver_indexsante.py
       - name: Committer et pousser si du neuf
-        if: steps.capture.outputs.ecritures != '0'
+        if: steps.archive.outputs.ecritures == '1'
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add data/indexsante/
           if git diff --cached --quiet; then
             echo "Rien à committer."
             exit 0
           fi
-          git commit -m "Capture automatique — $(date -u '+%Y-%m-%d %H:%M UTC')"
-          # Une autre exécution a pu pousser entre-temps : on rejoue par-dessus.
+          git commit -m "Archive Index Santé — $(date -u '+%Y-%m-%d %H:%M UTC')"
           for tentative in 1 2 3; do
             if git push; then
               exit 0
