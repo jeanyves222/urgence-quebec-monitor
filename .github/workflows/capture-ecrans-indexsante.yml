@@ -10,7 +10,12 @@ name: Capture écrans Index Santé (quarts)
 on:
   schedule:
     - cron: '*/5 4,5,12,13,20,21 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      forcer:
+        description: "Forcer une capture complète maintenant (test), même hors fenêtre de quart"
+        type: boolean
+        default: false
 
 concurrency:
   group: capture-ecrans-indexsante
@@ -38,7 +43,9 @@ jobs:
       - name: Installer Chromium (Playwright)
         run: playwright install --with-deps chromium
 
-      - name: Lancer la capture (no-op si hors fenêtre)
+      - name: Lancer la capture (no-op si hors fenêtre, sauf si forcée)
+        env:
+          FORCER_CAPTURE: ${{ github.event.inputs.forcer || 'false' }}
         run: python scripts/capture_ecrans_indexsante.py
 
       - name: Committer et pousser les nouvelles captures
