@@ -1,15 +1,18 @@
 name: Capture écrans Index Santé (quarts)
 
-# Se déclenche toutes les 5 minutes, mais UNIQUEMENT à l'intérieur de larges
-# plages entourant 0h, 8h et 16h heure de Montréal, converties en UTC pour les
-# DEUX régimes d'heure (été ET hiver) à la fois — 4h/5h, 12h/13h, 20h/21h UTC.
-# Comme ça, aucune modification n'est nécessaire au changement d'heure de
-# novembre. La très grande majorité de ces déclenchements se terminent en
-# quelques secondes sans rien capturer : c'est le script Python qui décide,
-# à la minute près (heure de Montréal), s'il doit réellement capturer.
+# Déclenché UNIQUEMENT par un appel externe (cron-job.org) toutes les 5
+# minutes via workflow_dispatch. L'ancien déclencheur natif GitHub
+# (« schedule: ») a été retiré volontairement : en plus d'être peu fiable
+# (déclenchements rares et imprévisibles), le garder actif EN MÊME TEMPS
+# que cron-job.org causait des déclenchements en double pour une même
+# fenêtre de quart (deux exécutions parallèles capturant les mêmes pages
+# et entrant en conflit au moment de pousser les fichiers). Avec un seul
+# déclencheur (cron-job.org), ce risque disparaît.
+#
+# La très grande majorité de ces déclenchements se terminent en quelques
+# secondes sans rien capturer : c'est le script Python qui décide, à la
+# minute près (heure de Montréal), s'il doit réellement capturer.
 on:
-  schedule:
-    - cron: '*/5 4,5,12,13,20,21 * * *'
   workflow_dispatch:
     inputs:
       forcer:
