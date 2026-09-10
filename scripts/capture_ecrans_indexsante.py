@@ -1,5 +1,5 @@
 """
-CAPTURE D'ÉCRAN INDEX SANTÉ — V1.0
+CAPTURE D'ÉCRAN INDEX SANTÉ — V1.1
 ----------------------------------------------------------------------------
 But : conserver une preuve visuelle horodatée (screenshot pleine page) de la
 page nationale d'Index Santé et des 26 installations de la catégorisation
@@ -7,16 +7,26 @@ officielle (PIVOT, COMPARABLE, CONTEXTE — voir comparables-fatima), en cas de
 litige sur la fiabilité des sources.
 
 Conçu pour tourner sur un runner GitHub HÉBERGÉ (ubuntu-latest), déclenché
-toutes les 5 minutes dans une large plage d'heures UTC (voir le .yml). Le
-script lui-même décide s'il doit RÉELLEMENT capturer : seulement aux mêmes
+toutes les 5 minutes par un appel externe (cron-job.org → workflow_dispatch).
+Le script lui-même décide s'il doit RÉELLEMENT capturer : seulement aux mêmes
 fenêtres que la Feuille 1, soit :05 et :55 des heures 0h, 8h et 16h, heure de
 Montréal — calculé avec ZoneInfo, donc insensible au changement d'heure. Les
 autres passages se terminent en une seconde, sans capture.
 
-Anti-doublon : une fenêtre déjà captée aujourd'hui (dossier déjà présent) est
-sautée. Rattrapage : une fenêtre manquée est encore captée jusqu'à
-TOLERANCE_RATTRAPAGE_MIN minutes après l'heure cible, pour absorber les
-retards habituels du planificateur de GitHub.
+Anti-doublon (script) : une fenêtre déjà captée aujourd'hui (dossier déjà
+présent au démarrage) est sautée. Rattrapage : une fenêtre manquée est encore
+captée jusqu'à TOLERANCE_RATTRAPAGE_MIN minutes après l'heure cible, pour
+absorber les retards habituels du déclencheur.
+
+Anti-doublon (git, V1.1) : comme une vraie capture dure plusieurs minutes —
+plus longtemps que l'intervalle de 5 minutes entre deux appels — plusieurs
+exécutions peuvent démarrer avant que la première ait fini et poussé ses
+fichiers, chacune constatant (à tort) que le dossier n'existe pas encore.
+Pour éviter que deux exécutions capturent la même fenêtre et entrent en
+conflit au moment de pousser (conflit git sur des fichiers binaires), le nom
+du dossier de sortie est exporté vers GITHUB_ENV : l'étape de commit du
+workflow revérifie, juste avant d'ajouter les fichiers, si ce dossier existe
+déjà sur origin/main, et abandonne proprement si c'est le cas.
 
 Sortie : captures/AAAA-MM-JJ/HHhMM/ — un PNG par cible (optimisé sans perte
 avec Pillow) plus un CSV recapitulatif. Le .yml pousse le tout dans le dépôt.
@@ -35,7 +45,7 @@ import traceback
 
 from PIL import Image
 
-VERSION_SCRIPT = "V1.0-CAPTURE-ECRANS-QUARTS"
+VERSION_SCRIPT = "V1.1-ANTI-DOUBLON-GIT"
 
 FUSEAU_HORAIRE = ZoneInfo("America/Montreal")
 
@@ -290,6 +300,24 @@ def fenetre_cible_courante(maintenant):
     return None
 
 
+def exporter_dossier_vers_github_env(dossier_sortie):
+    """
+    Écrit le chemin (relatif, style posix) du dossier de sortie dans
+    GITHUB_ENV, pour que l'étape suivante du workflow (commit/push) puisse
+    revérifier juste avant de committer si ce dossier existe déjà sur
+    origin/main — voir l'anti-doublon git en tête de fichier. Sans effet
+    (et sans erreur) hors d'un run GitHub Actions.
+    """
+    github_env = os.environ.get("GITHUB_ENV")
+    if not github_env:
+        return
+    try:
+        with open(github_env, "a", encoding="utf-8") as f:
+            f.write(f"DOSSIER_CAPTURE={dossier_sortie.as_posix()}\n")
+    except Exception as e:
+        print(f"AVERTISSEMENT — écriture GITHUB_ENV a échoué : {e}")
+
+
 def optimiser_png_sans_perte(chemin_fichier):
     """Recompresse le PNG sans perte (mêmes pixels, fichier plus léger)."""
     try:
@@ -402,6 +430,12 @@ def main():
             print(f"[{maintenant:%Y-%m-%d %H:%M:%S}] Fenêtre {cible_fenetre:%Y-%m-%d %Hh%M} déjà captée — rien à faire.")
             return
 
+    # Anti-doublon git (V1.1) : on prévient l'étape de commit du chemin exact
+    # du dossier qu'on s'apprête à remplir, pour qu'elle puisse revérifier
+    # juste avant de committer si une AUTRE exécution, démarrée entre-temps,
+    # a déjà poussé ce même dossier — voir l'en-tête du fichier.
+    exporter_dossier_vers_github_env(dossier_sortie)
+
     dossier_sortie.mkdir(parents=True, exist_ok=True)
     journal_path = dossier_sortie / "journal_capture.txt"
 
@@ -426,10 +460,13 @@ def main():
     journaliser(journal_path, f"Captures en erreur : {nb_erreurs}/{NB_CIBLES_ATTENDU}")
     journaliser(journal_path, f"Fin capture Index Santé {VERSION_SCRIPT}")
 
-    if nb_erreurs > 0:
-        # Le code de sortie non nul fait apparaître le run en échec dans
-        # l'onglet Actions, sans empêcher les fichiers déjà écrits d'être
-        # commités par l'étape suivante du workflow.
+    if nb_ok == 0:
+        # On ne fait échouer visiblement le run (croix rouge + courriel
+        # d'alerte GitHub) que si RIEN n'a fonctionné — signe probable d'un
+        # vrai problème (script, réseau, environnement). Une ou quelques
+        # cibles en erreur parmi 27 est une situation normale (site source
+        # temporairement indisponible pour UNE installation) : le CSV et le
+        # journal la documentent déjà, ce n'est pas un échec du dispositif.
         sys.exit(1)
 
 
