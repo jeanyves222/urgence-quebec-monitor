@@ -1,17 +1,20 @@
 name: Capture écrans Index Santé (quarts)
 
 # Déclenché UNIQUEMENT par un appel externe (cron-job.org) toutes les 5
-# minutes via workflow_dispatch. L'ancien déclencheur natif GitHub
-# (« schedule: ») a été retiré volontairement : en plus d'être peu fiable
-# (déclenchements rares et imprévisibles), le garder actif EN MÊME TEMPS
-# que cron-job.org causait des déclenchements en double pour une même
-# fenêtre de quart (deux exécutions parallèles capturant les mêmes pages
-# et entrant en conflit au moment de pousser les fichiers). Avec un seul
-# déclencheur (cron-job.org), ce risque disparaît.
+# minutes via workflow_dispatch. La très grande majorité de ces
+# déclenchements se terminent en quelques secondes sans rien capturer :
+# c'est le script Python qui décide, à la minute près (heure de Montréal),
+# s'il doit réellement capturer.
 #
-# La très grande majorité de ces déclenchements se terminent en quelques
-# secondes sans rien capturer : c'est le script Python qui décide, à la
-# minute près (heure de Montréal), s'il doit réellement capturer.
+# Anti-doublon (V1.1) : une vraie capture dure plusieurs minutes — plus
+# longtemps que l'intervalle de 5 minutes entre deux appels. Il arrive donc
+# que deux exécutions démarrent avant que la première ait fini et poussé ses
+# fichiers, chacune capturant la même fenêtre sans le savoir. Pour éviter
+# que ça se termine en run "failed" (conflit git sur des fichiers binaires),
+# l'étape de commit revérifie juste avant d'ajouter les fichiers si le
+# dossier de cette capture existe déjà sur origin/main, et s'arrête
+# proprement (succès, rien à faire) si c'est le cas — aucune donnée n'est
+# perdue, l'autre exécution a déjà poussé une capture équivalente.
 on:
   workflow_dispatch:
     inputs:
@@ -52,31 +55,52 @@ jobs:
         run: python scripts/capture_ecrans_indexsante.py
 
       - name: Committer et pousser les nouvelles captures
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Anti-doublon git : si le script a rempli un dossier de capture,
+          # son chemin nous a été transmis via DOSSIER_CAPTURE. On revérifie
+          # ici, à la toute dernière minute, si ce dossier existe déjà sur
+          # origin/main — auquel cas une autre exécution nous a devancés
+          # pendant qu'on capturait, et on s'arrête sans rien committer.
+          if [ -n "$DOSSIER_CAPTURE" ]; then
+            git fetch origin main --quiet
+            if git cat-file -e "origin/main:$DOSSIER_CAPTURE" 2>/dev/null; then
+              echo "Une autre exécution a déjà capturé et poussé '$DOSSIER_CAPTURE' entre-temps — doublon ignoré, aucune donnée perdue."
+              exit 0
+            fi
+          fi
 
           if [ -d captures ]; then
             git add captures/
           fi
 
           if git diff --cached --quiet; then
-            echo "Rien à committer (hors fenêtre, ou fenêtre déjà captée)."
+            echo "Rien à committer (hors fenêtre, fenêtre déjà captée, ou capture échouée sans aucun fichier)."
             exit 0
           fi
 
           git commit -m "Capture écrans Index Santé $(date -u +'%Y-%m-%d %H:%M UTC')"
 
-          # Boucle de reprise avec rebase, au cas où un autre passage aurait
-          # poussé entre-temps — trois tentatives, comme sur les autres
-          # workflows du dépôt.
+          # Boucle de reprise avec rebase, filet de sécurité pour le cas rare
+          # où une autre exécution aurait poussé entre notre vérification
+          # ci-dessus et notre propre push. Si malgré tout un vrai conflit de
+          # fusion survient (même cause : doublon de fenêtre), on abandonne
+          # proprement plutôt que de faire échouer le run — l'autre
+          # exécution a déjà les captures.
           for tentative in 1 2 3; do
             if git push; then
               echo "Poussé avec succès (tentative $tentative)."
               exit 0
             fi
             echo "Échec du push (tentative $tentative), rebase et nouvel essai..."
-            git pull --rebase
+            if ! git pull --rebase; then
+              echo "Conflit de fusion pendant le rebase — probablement un doublon de fenêtre déjà poussé par une autre exécution. Abandon propre, aucune donnée perdue."
+              git rebase --abort
+              exit 0
+            fi
             sleep 5
           done
 
