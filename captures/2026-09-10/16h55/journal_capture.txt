@@ -1,0 +1,89 @@
+[2026-09-10 16:56:06] Début capture Index Santé V1.1-ANTI-DOUBLON-GIT
+[2026-09-10 16:56:06] Fenêtre cible : 2026-09-10 16h55 (heure de Montréal)
+[2026-09-10 16:56:06] Heure réelle de déclenchement : 2026-09-10 16:56:06
+[2026-09-10 16:56:06] Dossier de sortie : captures/2026-09-10/16h55
+[2026-09-10 16:56:07] Ouverture : 00_urgences_quebec - Urgences Québec (page nationale) | tentative 1
+[2026-09-10 16:56:07] URL : https://www.indexsante.ca/urgences/
+[2026-09-10 16:56:21] OK capture : captures/2026-09-10/16h55/00_urgences_quebec.png
+[2026-09-10 16:56:21] Ouverture : 01_fatima - Hôpital Notre-Dame-de-Fatima | tentative 1
+[2026-09-10 16:56:21] URL : https://www.indexsante.ca/hopitaux/bas-saint-laurent/11839/hopital-notre-dame-de-fatima.php
+[2026-09-10 16:57:03] OK capture : captures/2026-09-10/16h55/01_fatima.png
+[2026-09-10 16:57:03] Ouverture : 02_notre_dame_du_lac - Hôpital de Notre-Dame-du-Lac | tentative 1
+[2026-09-10 16:57:03] URL : https://www.indexsante.ca/hopitaux/bas-saint-laurent/4037/hopital-notre-dame-du-lac.php
+[2026-09-10 16:57:14] OK capture : captures/2026-09-10/16h55/02_notre_dame_du_lac.png
+[2026-09-10 16:57:14] Ouverture : 03_la_sarre - Centre multiservices de santé et de services sociaux de La Sarre | tentative 1
+[2026-09-10 16:57:14] URL : https://www.indexsante.ca/hopitaux/abitibi-temiscamingue/4075/hopital-de-la-sarre.php
+[2026-09-10 16:57:25] OK capture : captures/2026-09-10/16h55/03_la_sarre.png
+[2026-09-10 16:57:25] Ouverture : 04_barrie_memorial - Hôpital Barrie Memorial | tentative 1
+[2026-09-10 16:57:25] URL : https://www.indexsante.ca/hopitaux/monteregie/426/hopital-barrie-memorial.php
+[2026-09-10 16:57:36] OK capture : captures/2026-09-10/16h55/04_barrie_memorial.png
+[2026-09-10 16:57:36] Ouverture : 05_archipel - Hôpital de l'Archipel | tentative 1
+[2026-09-10 16:57:36] URL : https://www.indexsante.ca/hopitaux/gaspesie-iles-de-la-madeleine/407/hopital-de-l-archipel.php
+[2026-09-10 16:57:47] OK capture : captures/2026-09-10/16h55/05_archipel.png
+[2026-09-10 16:57:47] Ouverture : 06_maniwaki - Hôpital de Maniwaki | tentative 1
+[2026-09-10 16:57:47] URL : https://www.indexsante.ca/hopitaux/outaouais/385/hopital-de-maniwaki.php
+[2026-09-10 16:57:58] OK capture : captures/2026-09-10/16h55/06_maniwaki.png
+[2026-09-10 16:57:58] Ouverture : 07_amqui - Hôpital d'Amqui | tentative 1
+[2026-09-10 16:57:58] URL : https://www.indexsante.ca/hopitaux/bas-saint-laurent/4036/hopital-amqui.php
+[2026-09-10 16:58:09] OK capture : captures/2026-09-10/16h55/07_amqui.png
+[2026-09-10 16:58:09] Ouverture : 08_sainte_anne_des_monts - Hôpital de Sainte-Anne-des-Monts | tentative 1
+[2026-09-10 16:58:09] URL : https://www.indexsante.ca/hopitaux/gaspesie-iles-de-la-madeleine/406/hopital-de-sainte-anne-des-monts.php
+[2026-09-10 16:58:20] OK capture : captures/2026-09-10/16h55/08_sainte_anne_des_monts.png
+[2026-09-10 16:58:20] Ouverture : 09_gaspe - Hôpital Hôtel-Dieu de Gaspé | tentative 1
+[2026-09-10 16:58:20] URL : https://www.indexsante.ca/hopitaux/gaspesie-iles-de-la-madeleine/405/hopital-hotel-dieu-de-gaspe.php
+[2026-09-10 16:58:32] OK capture : captures/2026-09-10/16h55/09_gaspe.png
+[2026-09-10 16:58:32] Ouverture : 10_des_sources - Centre multiservices de santé et de services sociaux des Sources | tentative 1
+[2026-09-10 16:58:32] URL : https://www.indexsante.ca/hopitaux/estrie/4059/hopital-asbestos.php
+[2026-09-10 16:58:43] OK capture : captures/2026-09-10/16h55/10_des_sources.png
+[2026-09-10 16:58:43] Ouverture : 11_amos - Hôpital d'Amos | tentative 1
+[2026-09-10 16:58:43] URL : https://www.indexsante.ca/hopitaux/abitibi-temiscamingue/4076/hopital-amos.php
+[2026-09-10 16:58:54] OK capture : captures/2026-09-10/16h55/11_amos.png
+[2026-09-10 16:58:54] Ouverture : 12_la_baie - Hôpital de La Baie | tentative 1
+[2026-09-10 16:58:54] URL : https://www.indexsante.ca/hopitaux/saguenay-lac-saint-jean/4039/hopital-de-la-baie.php
+[2026-09-10 16:59:05] OK capture : captures/2026-09-10/16h55/12_la_baie.png
+[2026-09-10 16:59:05] Ouverture : 13_portneuf - Hôpital régional de Portneuf | tentative 1
+[2026-09-10 16:59:05] URL : https://www.indexsante.ca/hopitaux/capitale-nationale/333/hopital-regional-de-portneuf.php
+[2026-09-10 16:59:16] OK capture : captures/2026-09-10/16h55/13_portneuf.png
+[2026-09-10 16:59:16] Ouverture : 14_matane - Hôpital de Matane | tentative 1
+[2026-09-10 16:59:16] URL : https://www.indexsante.ca/hopitaux/bas-saint-laurent/319/hopital-de-matane.php
+[2026-09-10 16:59:27] OK capture : captures/2026-09-10/16h55/14_matane.png
+[2026-09-10 16:59:27] Ouverture : 15_rouyn_noranda - Hôpital de Rouyn-Noranda | tentative 1
+[2026-09-10 16:59:27] URL : https://www.indexsante.ca/hopitaux/abitibi-temiscamingue/390/hopital-de-rouyn-noranda.php
+[2026-09-10 16:59:38] OK capture : captures/2026-09-10/16h55/15_rouyn_noranda.png
+[2026-09-10 16:59:38] Ouverture : 16_mont_laurier - Hôpital de Mont-Laurier | tentative 1
+[2026-09-10 16:59:38] URL : https://www.indexsante.ca/hopitaux/laurentides/418/hopital-de-mont-laurier.php
+[2026-09-10 16:59:49] OK capture : captures/2026-09-10/16h55/16_mont_laurier.png
+[2026-09-10 16:59:49] Ouverture : 17_baie_saint_paul - Hôpital de Baie-Saint-Paul | tentative 1
+[2026-09-10 16:59:49] URL : https://www.indexsante.ca/hopitaux/capitale-nationale/4051/hopital-baie-saint-paul.php
+[2026-09-10 17:00:00] OK capture : captures/2026-09-10/16h55/17_baie_saint_paul.png
+[2026-09-10 17:00:00] Ouverture : 18_chandler - Hôpital de Chandler | tentative 1
+[2026-09-10 17:00:00] URL : https://www.indexsante.ca/hopitaux/gaspesie-iles-de-la-madeleine/408/hopital-de-chandler.php
+[2026-09-10 17:00:11] OK capture : captures/2026-09-10/16h55/18_chandler.png
+[2026-09-10 17:00:11] Ouverture : 19_la_malbaie - Hôpital de La Malbaie | tentative 1
+[2026-09-10 17:00:11] URL : https://www.indexsante.ca/hopitaux/capitale-nationale/4052/hopital-de-la-malbaie.php
+[2026-09-10 17:00:23] OK capture : captures/2026-09-10/16h55/19_la_malbaie.png
+[2026-09-10 17:00:23] Ouverture : 20_grand_portage - Centre hospitalier régional du Grand-Portage | tentative 1
+[2026-09-10 17:00:23] URL : https://www.indexsante.ca/hopitaux/bas-saint-laurent/321/centre-hospitalier-regional-du-grand-portage.php
+[2026-09-10 17:00:34] OK capture : captures/2026-09-10/16h55/20_grand_portage.png
+[2026-09-10 17:00:34] Ouverture : 21_montmagny - Hôpital de Montmagny | tentative 1
+[2026-09-10 17:00:34] URL : https://www.indexsante.ca/hopitaux/chaudiere-appalaches/411/hopital-de-montmagny.php
+[2026-09-10 17:00:45] OK capture : captures/2026-09-10/16h55/21_montmagny.png
+[2026-09-10 17:00:45] Ouverture : 22_sept_iles - Hôpital et CLSC de Sept-Îles | tentative 1
+[2026-09-10 17:00:45] URL : https://www.indexsante.ca/hopitaux/cote-nord/134/hopital-de-sept-iles.php
+[2026-09-10 17:00:56] OK capture : captures/2026-09-10/16h55/22_sept_iles.png
+[2026-09-10 17:00:56] Ouverture : 23_le_royer - CLSC et Hôpital Le Royer | tentative 1
+[2026-09-10 17:00:56] URL : https://www.indexsante.ca/hopitaux/cote-nord/4077/hopital-le-royer.php
+[2026-09-10 17:01:07] OK capture : captures/2026-09-10/16h55/23_le_royer.png
+[2026-09-10 17:01:07] Ouverture : 24_maria - Hôpital de Maria | tentative 1
+[2026-09-10 17:01:07] URL : https://www.indexsante.ca/hopitaux/gaspesie-iles-de-la-madeleine/136/hopital-de-maria.php
+[2026-09-10 17:01:18] OK capture : captures/2026-09-10/16h55/24_maria.png
+[2026-09-10 17:01:18] Ouverture : 25_thetford_mines - Hôpital de Thetford Mines | tentative 1
+[2026-09-10 17:01:18] URL : https://www.indexsante.ca/hopitaux/chaudiere-appalaches/410/hopital-de-thetford-mines.php
+[2026-09-10 17:01:29] OK capture : captures/2026-09-10/16h55/25_thetford_mines.png
+[2026-09-10 17:01:29] Ouverture : 26_saint_georges - Hôpital de Saint-Georges | tentative 1
+[2026-09-10 17:01:29] URL : https://www.indexsante.ca/hopitaux/chaudiere-appalaches/412/hopital-de-saint-georges.php
+[2026-09-10 17:01:40] OK capture : captures/2026-09-10/16h55/26_saint_georges.png
+[2026-09-10 17:01:40] CSV récapitulatif : captures/2026-09-10/16h55/resume_captures.csv
+[2026-09-10 17:01:40] Captures OK : 27/27
+[2026-09-10 17:01:40] Captures en erreur : 0/27
+[2026-09-10 17:01:40] Fin capture Index Santé V1.1-ANTI-DOUBLON-GIT
