@@ -272,10 +272,17 @@ def horodatage_fichier(infos):
     même nom et n'archive pas de doublon. À défaut d'horodatage dans les
     données, on se rabat sur l'empreinte du contenu — deux fichiers identiques
     donnent alors le même nom."""
-    m = re.match(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})",
+    # 12 octobre 2026 : certains jours, la source écrit l'heure sur UN seul
+    # chiffre entre minuit et 9 h 45 (« 2026-09-13T1:45 » au lieu de
+    # « 2026-09-13T01:45 »). L'ancienne expression exigeait deux chiffres :
+    # ces fichiers, pourtant complets et horodatés, étaient nommés par
+    # empreinte (61 en septembre). On accepte maintenant un ou deux chiffres
+    # pour le mois, le jour et l'heure, et on complète avec un zéro.
+    m = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})[T ](\d{1,2}):(\d{2})",
                  infos.get("mise_a_jour") or "")
     if m:
         a, mo, j, h, mi = m.groups()
+        mo, j, h = mo.zfill(2), j.zfill(2), h.zfill(2)
         return a, mo, f"{a}-{mo}-{j}_{h}{mi}"
     n = maintenant_montreal()
     return n.strftime("%Y"), n.strftime("%m"), f"{n:%Y-%m-%d}_{infos['empreinte']}"
