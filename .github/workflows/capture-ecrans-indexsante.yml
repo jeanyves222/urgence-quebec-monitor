@@ -35,8 +35,23 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - name: Récupérer le dépôt
+      # Récupération allégée (V1.2) : on ne télécharge que les scripts et les
+      # captures du mois courant (heure de Montréal), plutôt que tout le
+      # dépôt avec toutes les images accumulées depuis septembre. Les mois
+      # antérieurs restent intacts et accessibles sur GitHub : ils ne sont
+      # simplement pas téléchargés à chaque exécution.
+      - name: Déterminer le mois courant (heure de Montréal)
+        id: mois
+        run: echo "mois=$(TZ=America/Montreal date +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Récupérer le dépôt (scripts et captures du mois courant seulement)
         uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/
+            /captures/${{ steps.mois.outputs.mois }}-*/
 
       - name: Installer Python
         uses: actions/setup-python@v5
