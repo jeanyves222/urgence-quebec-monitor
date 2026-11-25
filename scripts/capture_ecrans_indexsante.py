@@ -1,5 +1,5 @@
 """
-CAPTURE D'ÉCRAN INDEX SANTÉ — V1.2
+CAPTURE D'ÉCRAN INDEX SANTÉ — V1.3
 ----------------------------------------------------------------------------
 But : conserver une preuve visuelle horodatée (screenshot pleine page) de la
 page nationale d'Index Santé et des 26 installations de la catégorisation
@@ -15,7 +15,15 @@ modifier le script. Si cette lecture échoue, la liste de secours des 15 pages
 connues au 16 novembre 2026 est utilisée, pour ne jamais perdre la capture. Ces pages publient le taux d'occupation régional et la
 durée moyenne d'attente régionale calculés par la source elle-même, sur les
 30 derniers jours : une capture par jour suffit à en garder tout l'historique,
-et une capture manquée se rattrape le lendemain. Fichiers 30_region_… à
+et une capture manquée se rattrape le lendemain.
+
+Nouveau en V1.3 : les publicités et les bandeaux flottants ne masquent plus
+les données. Les requêtes vers les régies publicitaires connues sont bloquées,
+et juste avant la capture, les emplacements publicitaires et les éléments
+flottants (position fixe ou collante : bannières, bandeaux, fenêtres
+superposées) sont masqués. Le contenu de la page — chiffres, tableaux,
+graphiques, heure de mise à jour — n'est jamais modifié. Le journal indique,
+pour chaque capture, le nombre d'éléments masqués et de requêtes bloquées. Fichiers 30_region_… à
 44_region_… pour les 15 régions connues (numéros fixes), 45_region_… et plus
 pour toute nouvelle région, dans le même dossier que les autres captures de
 08h55.
@@ -52,6 +60,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import csv
+from urllib.parse import urlparse
 import re
 import os
 import sys
@@ -60,7 +69,7 @@ import traceback
 
 from PIL import Image
 
-VERSION_SCRIPT = "V1.2-PAGES-REGIONALES"
+VERSION_SCRIPT = "V1.3-SANS-PUBLICITE"
 
 FUSEAU_HORAIRE = ZoneInfo("America/Montreal")
 
@@ -471,6 +480,55 @@ def optimiser_png_sans_perte(chemin_fichier):
         print(f"AVERTISSEMENT — optimisation PNG a échoué pour {chemin_fichier} : {e}")
 
 
+# ----------------------------------------------------------------------------
+# PUBLICITÉS ET BANDEAUX (V1.3)
+# ----------------------------------------------------------------------------
+DOMAINES_PUBLICITAIRES = (
+    "doubleclick.net", "googlesyndication.com", "googletagservices.com",
+    "googleadservices.com", "adservice.google.com", "adservice.google.ca",
+    "amazon-adsystem.com", "adnxs.com", "criteo.com", "criteo.net",
+    "taboola.com", "outbrain.com", "pubmatic.com", "rubiconproject.com",
+    "openx.net", "casalemedia.com", "moatads.com", "adsafeprotected.com",
+    "teads.tv", "sharethrough.com", "media.net", "smartadserver.com",
+    "fundingchoicesmessages.google.com",
+)
+
+JS_MASQUER_PUBLICITES = r"""
+() => {
+  let n = 0;
+  const cacher = (el) => {
+    if (!el || el === document.body || el === document.documentElement) return;
+    if (el.dataset && el.dataset.msriMasque) return;
+    el.style.setProperty('display', 'none', 'important');
+    if (el.dataset) el.dataset.msriMasque = '1';
+    n++;
+  };
+  const selecteurs = [
+    'ins.adsbygoogle', '.adsbygoogle', '[id^="google_ads"]', '[id^="div-gpt-ad"]',
+    '[id^="aswift_"]', 'iframe[src*="doubleclick"]', 'iframe[src*="googlesyndication"]',
+    'iframe[id^="google_ads"]', '[data-google-query-id]', '.google-auto-placed',
+    '.fc-consent-root', '.fc-dialog-overlay'
+  ];
+  document.querySelectorAll(selecteurs.join(',')).forEach(cacher);
+  document.querySelectorAll('body *').forEach((el) => {
+    const pos = getComputedStyle(el).position;
+    if (pos === 'fixed' || pos === 'sticky') cacher(el);
+  });
+  document.documentElement.style.setProperty('overflow', 'visible', 'important');
+  document.body.style.setProperty('overflow', 'visible', 'important');
+  return n;
+}
+"""
+
+
+def est_requete_publicitaire(url):
+    try:
+        hote = urlparse(url).hostname or ""
+    except Exception:
+        return False
+    return any(hote == d or hote.endswith("." + d) for d in DOMAINES_PUBLICITAIRES)
+
+
 def capturer_une_cible(playwright, cible, dossier_sortie, journal_path):
     fichier = dossier_sortie / f"{cible['code']}.png"
     for tentative in range(1, MAX_TENTATIVES + 1):
@@ -484,6 +542,16 @@ def capturer_une_cible(playwright, cible, dossier_sortie, journal_path):
                 locale="fr-CA",
                 ignore_https_errors=True,
             )
+            bloquees = [0]
+
+            def filtrer(route):
+                if est_requete_publicitaire(route.request.url):
+                    bloquees[0] += 1
+                    route.abort()
+                else:
+                    route.continue_()
+
+            context.route("**/*", filtrer)
             page = context.new_page()
             page.goto(cible["url"], wait_until="domcontentloaded", timeout=TIMEOUT_NAVIGATION_MS)
             page.wait_for_timeout(ATTENTE_APRES_CHARGEMENT_MS)
@@ -491,6 +559,12 @@ def capturer_une_cible(playwright, cible, dossier_sortie, journal_path):
                 page.wait_for_load_state("networkidle", timeout=TIMEOUT_NETWORKIDLE_MS)
             except Exception:
                 pass
+            try:
+                nb_masques = page.evaluate(JS_MASQUER_PUBLICITES)
+                page.wait_for_timeout(500)
+            except Exception as e_masque:
+                nb_masques = f"échec ({type(e_masque).__name__})"
+            journaliser(journal_path, f"Publicités et bandeaux masqués : {nb_masques} ; requêtes publicitaires bloquées : {bloquees[0]}")
             page.screenshot(path=str(fichier), full_page=True)
             context.close()
             browser.close()
