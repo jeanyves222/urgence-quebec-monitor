@@ -35,23 +35,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      # Récupération allégée (V1.2) : on ne télécharge que les scripts et les
-      # captures du mois courant (heure de Montréal), plutôt que tout le
-      # dépôt avec toutes les images accumulées depuis septembre. Les mois
-      # antérieurs restent intacts et accessibles sur GitHub : ils ne sont
-      # simplement pas téléchargés à chaque exécution.
-      - name: Déterminer le mois courant (heure de Montréal)
-        id: mois
-        run: echo "mois=$(TZ=America/Montreal date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      # Récupération allégée (V1.3) : on ne télécharge que les scripts et les
+      # captures du JOUR courant (heure de Montréal). Le script n'a besoin que
+      # de ce dossier pour savoir si la fenêtre est déjà captée. En V1.2, le
+      # mois entier était téléchargé : plus de 4 000 images en fin de mois,
+      # et des coupures réseau en plein transfert (25 et 26 novembre 2026).
+      # Les jours et mois antérieurs restent intacts sur GitHub.
+      - name: Déterminer le jour courant (heure de Montréal)
+        id: jour
+        run: echo "jour=$(TZ=America/Montreal date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
-      - name: Récupérer le dépôt (scripts et captures du mois courant seulement)
+      - name: Récupérer le dépôt (scripts et captures du jour seulement)
         uses: actions/checkout@v4
         with:
           filter: blob:none
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /scripts/
-            /captures/${{ steps.mois.outputs.mois }}-*/
+            /captures/${{ steps.jour.outputs.jour }}/
 
       - name: Installer Python
         uses: actions/setup-python@v5
@@ -61,8 +62,25 @@ jobs:
       - name: Installer les dépendances Python
         run: pip install playwright pillow
 
+      # V1.3 : le dépôt de paquets Microsoft préinstallé sur la machine de
+      # GitHub ne sert pas ici ; lorsqu'il répond « 403 Forbidden », toute
+      # l'installation de Chromium échouait (26 novembre 2026). On le retire.
+      - name: Retirer le dépôt de paquets Microsoft (inutile ici)
+        run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list /etc/apt/sources.list.d/microsoft-prod.sources
+
+      # V1.3 : jusqu'à trois tentatives, pour absorber une panne passagère
+      # d'un serveur de paquets.
       - name: Installer Chromium (Playwright)
-        run: playwright install --with-deps chromium
+        run: |
+          for tentative in 1 2 3; do
+            if playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "Échec de l'installation (tentative $tentative), nouvel essai dans 20 secondes..."
+            sleep 20
+          done
+          echo "ÉCHEC : impossible d'installer Chromium après 3 tentatives."
+          exit 1
 
       - name: Lancer la capture (no-op si hors fenêtre, sauf si forcée)
         env:
