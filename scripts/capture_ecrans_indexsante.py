@@ -1,5 +1,5 @@
 """
-CAPTURE D'ÉCRAN INDEX SANTÉ — V1.4
+CAPTURE D'ÉCRAN INDEX SANTÉ — V1.5
 ----------------------------------------------------------------------------
 But : conserver une preuve visuelle horodatée (screenshot pleine page) de la
 page nationale d'Index Santé et des 26 installations de la catégorisation
@@ -33,7 +33,18 @@ script attend maintenant que la vérification se lève (jusqu'à 60 secondes),
 puis vérifie de nouveau ; si elle persiste, la capture est notée en ERREUR et
 reprise. Un seul navigateur sert désormais à toutes les captures d'une même
 fenêtre : une fois la vérification franchie sur la première page, les
-suivantes en profitent au lieu de la repasser chacune. Fichiers 30_region_… à
+suivantes en profitent au lieu de la repasser chacune.
+
+Nouveau en V1.5 : le 27 novembre 2026, la page de vérification ne s'est plus
+jamais levée pour les captures, alors que l'archiveur (simple téléchargement,
+mêmes machines GitHub) obtenait la vraie page cinq minutes plus tard. Index
+Santé reconnaît donc le navigateur automatisé, et non la machine. Le
+navigateur des captures se présente désormais comme un Chrome ordinaire
+(identification sans « HeadlessChrome », signes d'automatisation masqués,
+langue et fuseau du Québec). Abandon rapide : si la page nationale reste
+bloquée après ses trois tentatives, les autres pages de la fenêtre ne sont
+pas tentées (elles le seraient en vain pendant 25 minutes) ; elles sont
+notées en ERREUR et le run se termine en échec, ce qui prévient par courriel. Fichiers 30_region_… à
 44_region_… pour les 15 régions connues (numéros fixes), 45_region_… et plus
 pour toute nouvelle région, dans le même dossier que les autres captures de
 08h55.
@@ -79,7 +90,7 @@ import traceback
 
 from PIL import Image
 
-VERSION_SCRIPT = "V1.4-VERIFICATION-DETECTEE"
+VERSION_SCRIPT = "V1.5-NAVIGATEUR-ORDINAIRE"
 
 FUSEAU_HORAIRE = ZoneInfo("America/Montreal")
 
@@ -587,6 +598,36 @@ def attendre_fin_verification(page, journal_path):
     raise RuntimeError(f"page de vérification d'Index Santé toujours affichée après {ATTENTE_MAX_VERIFICATION_S} s")
 
 
+JS_MASQUER_AUTOMATISATION = r"""
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['fr-CA', 'fr', 'en-US', 'en'] });
+if (!window.chrome) { window.chrome = { runtime: {} }; }
+"""
+
+ARGUMENTS_NAVIGATEUR = ["--disable-blink-features=AutomationControlled"]
+
+
+def lancer_navigateur(playwright):
+    """
+    V1.5 : lance Chromium en mode « nouveau headless » (navigateur complet,
+    plus proche d'un Chrome ordinaire) ; à défaut, le mode habituel.
+    """
+    try:
+        return playwright.chromium.launch(headless=True, channel="chromium", args=ARGUMENTS_NAVIGATEUR)
+    except Exception:
+        return playwright.chromium.launch(headless=True, args=ARGUMENTS_NAVIGATEUR)
+
+
+def agent_utilisateur(browser):
+    """Identification d'un Chrome ordinaire, sans la mention « HeadlessChrome »."""
+    try:
+        majeure = (browser.version or "").split(".")[0] or "131"
+    except Exception:
+        majeure = "131"
+    return (f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{majeure}.0.0.0 Safari/537.36")
+
+
 class Navigateur:
     """
     Un seul navigateur et un seul contexte pour toute la fenêtre de capture
@@ -602,12 +643,16 @@ class Navigateur:
 
     def contexte(self):
         if self.context is None:
-            self.browser = self.playwright.chromium.launch(headless=True)
+            self.browser = lancer_navigateur(self.playwright)
             self.context = self.browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 locale="fr-CA",
+                timezone_id="America/Toronto",
+                user_agent=agent_utilisateur(self.browser),
+                extra_http_headers={"Accept-Language": "fr-CA,fr;q=0.9,en;q=0.5"},
                 ignore_https_errors=True,
             )
+            self.context.add_init_script(JS_MASQUER_AUTOMATISATION)
 
             def filtrer(route):
                 if est_requete_publicitaire(route.request.url):
@@ -856,8 +901,23 @@ def main():
                 journaliser(journal_path, f"Fenêtre de 08h55 : ajout de {len(pages_du_jour)} pages régionales")
             liste_a_capturer = list(CIBLES) + pages_du_jour
             nb_attendu = len(liste_a_capturer)
+            abandon = False
             for cible in liste_a_capturer:
-                resultats.append(capturer_une_cible(nav, cible, dossier_sortie, journal_path))
+                if abandon:
+                    resultats.append({
+                        "code": cible["code"], "nom": cible["nom"], "role": cible["role"],
+                        "bassin": cible["bassin"], "url": cible["url"], "statut": "ERREUR",
+                        "fichier_capture": "",
+                        "erreur": "non tentée : fenêtre abandonnée (page de vérification persistante sur la page nationale)",
+                    })
+                    continue
+                r = capturer_une_cible(nav, cible, dossier_sortie, journal_path)
+                resultats.append(r)
+                # V1.5 : abandon rapide si la page nationale reste bloquée.
+                if (cible["code"] == CIBLES[0]["code"] and r["statut"] == "ERREUR"
+                        and "vérification" in r["erreur"]):
+                    abandon = True
+                    journaliser(journal_path, "ABANDON de la fenêtre : la page nationale reste bloquée par la page de vérification d'Index Santé ; les autres pages ne sont pas tentées")
         finally:
             nav.fermer()
 
